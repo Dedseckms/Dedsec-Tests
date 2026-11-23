@@ -28,6 +28,51 @@ Check(Diagnostics.Live(new(){hotSsd},new(),90).Any(f=>f.Title=="Высокая �
 Check(Telemetry.MapSensor("CPU","Core 10",LibreHardwareMonitor.Hardware.HardwareType.Cpu,LibreHardwareMonitor.Hardware.SensorType.Temperature,10,98).Type=="Temperature","CPU temperature index 10 is not an NVMe threshold");
 Check(ErrorCodes.Explain("0x80070005",false).Contains("(5)"),"HRESULT_FROM_WIN32 unwraps access-denied code");
 Check(ErrorCodes.Explain("0x124",true).Contains("WHEA_UNCORRECTABLE_ERROR")&&!ErrorCodes.Explain("0x124",false).Contains("WHEA_UNCORRECTABLE_ERROR"),"BSOD and Win32 numeric domains stay separate");
+var scaled=new Measurement("ram_copy",32768,"MiB/s","ok","measured",4);
+Check(MeasurementDisplay.Format(scaled).EndsWith("GiB/s")&&MeasurementDisplay.Points(scaled)==32000&&scaled.Value==32768,"Human units and DT points are derived without modifying raw measurements");
+Check(MeasurementDisplay.Points(scaled with{Status="skipped"})==null&&MeasurementDisplay.Points(scaled with{Value=double.NaN})==null&&MeasurementDisplay.Points(scaled with{Seconds=0})==null,"Skipped, non-finite or untimed values never receive DT points");
+Check(MeasurementDisplay.Points(new("disk_latency",1,"ms","ok","measured",1))==null&&MeasurementDisplay.Points(new("ram_errors",0,"errors","ok","measured",1))==null,"Latency and integrity counts are not falsely presented as throughput scores");
+int publicationIndex=Array.IndexOf(args,"--publication-url");if(publicationIndex>=0)
+{
+    var publicationBase=new Uri(args[publicationIndex+1]);using var http=new System.Net.Http.HttpClient(new System.Net.Http.HttpClientHandler{UseProxy=!publicationBase.IsLoopback}){BaseAddress=publicationBase,Timeout=TimeSpan.FromSeconds(20)};
+    var fixture=new Report{Completed=true,System=new("DEDSEC QA TEMPORARY CLIENT FIXTURE",4,"Synthetic API fixture — not a real benchmark",8,"Windows QA fixture — temporary test record","X64",new()),DeleteToken=Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32)),Measurements=new(){new("cpu_multi",123.4,"MiB/s","ok","Synthetic disposable client transport test; not a hardware result",5)}};
+    if(args.Contains("--framing-probe"))
+    {
+        var challenge=await System.Net.Http.Json.HttpClientJsonExtensions.GetFromJsonAsync<JsonElement>(http,"api/challenge");var legacy=JsonSerializer.SerializeToNode(fixture.PublicPayload(),Json.Options)!;legacy["nonce"]=challenge.GetProperty("nonce").GetString();
+        using var rejected=await System.Net.Http.Json.HttpClientJsonExtensions.PostAsJsonAsync(http,"api/results",legacy);Check((int)rejected.StatusCode==400&&(await rejected.Content.ReadAsStringAsync()).Contains("Transfer encoding unsupported"),"Original streaming JsonContent reproduces the reported registry transport error");
+    }
+    string? url=null;
+    try
+    {
+        url=await PublicationClient.Send(http,fixture);string id=new Uri(url).Segments.Last();
+        var stored=await System.Net.Http.Json.HttpClientJsonExtensions.GetFromJsonAsync<JsonElement>(http,"api/results/"+id);
+        Check(stored.GetProperty("measurements")[0].GetProperty("value").GetDouble()==123.4&&stored.GetProperty("system").GetProperty("cpu").GetString()==fixture.System.Cpu,"Production .NET publisher succeeds against the real registry handler and preserves raw data");
+        Check(await PublicationClient.Send(http,fixture)==url,"Publication retry with a fresh nonce and saved key returns the same result");
+    }
+    finally
+    {
+        if(url!=null){using var request=new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Delete,"api/results/"+new Uri(url).Segments.Last());request.Headers.Add("Authorization","Bearer "+fixture.DeleteToken);using var deleted=await http.SendAsync(request);deleted.EnsureSuccessStatusCode();}
+    }
+    Check(true,"Disposable client fixture removed; no synthetic score retained");
+}
+if(args.Contains("--ui"))
+{
+    Exception? uiError=null;var thread=new Thread(()=>
+    {
+        try
+        {
+            Console.WriteLine("UI: load application resources");var app=new Dedsec.Tests.App();app.InitializeComponent();Console.WriteLine("UI: create live grid");var rows=new System.Collections.ObjectModel.ObservableCollection<ProcessRow>(Enumerable.Range(0,100).Select(i=>new ProcessRow("Process "+i,i,1,10)));
+            var grid=new System.Windows.Controls.DataGrid{ItemsSource=rows,IsReadOnly=true,CanUserAddRows=false,Height=240,Width=500,AutoGenerateColumns=true};
+            var window=new System.Windows.Window{Content=grid,Width=520,Height=280,ShowInTaskbar=false,WindowStyle=System.Windows.WindowStyle.ToolWindow};window.Show();window.UpdateLayout();
+            Console.WriteLine("UI: window layout ready");
+            var viewer=LiveTable.Find<System.Windows.Controls.ScrollViewer>(grid)!;viewer.ScrollToVerticalOffset(40);grid.UpdateLayout();double before=viewer.VerticalOffset;grid.SelectedItem=rows[45];
+            var values=rows.Select(r=>r with{Cpu=r.Cpu+1}).ToList();LiveTable.Refresh(grid,rows,values,p=>p.Pid.ToString());grid.UpdateLayout();
+            Check(before>0&&Math.Abs(viewer.VerticalOffset-before)<.01&&((ProcessRow)grid.SelectedItem).Pid==45,"Live grid refresh preserves scroll position and selected process while values change");
+            Check(((System.Windows.Media.SolidColorBrush)grid.Background).Color.R<80&&LiveTable.Find<System.Windows.Controls.Primitives.ScrollBar>(grid)!.Template!=null,"Packaged application resources provide dark table and explicit scrollbar templates");
+            string capture=Path.Combine(Environment.CurrentDirectory,"artifacts","ui-dark-grid.png");Directory.CreateDirectory(Path.GetDirectoryName(capture)!);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,System.Windows.Media.PixelFormats.Pbgra32);bitmap.Render(window);var png=new System.Windows.Media.Imaging.PngBitmapEncoder();png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var image=File.Create(capture))png.Save(image);window.Close();app.Shutdown();
+        }catch(Exception ex){uiError=ex;}
+    });thread.IsBackground=true;thread.SetApartmentState(ApartmentState.STA);thread.Start();if(!thread.Join(TimeSpan.FromSeconds(25)))throw new TimeoutException("UI regression timed out");if(uiError!=null)throw new Exception("UI regression failed",uiError);
+}
 if(args.Contains("--hardware"))
 {
     var multi=await Benchmarks.Cpu(true,CancellationToken.None,.25);Check(multi.Status=="ok"&&multi.Value>0,"All-logical-CPU workers verify SHA digests and return throughput");

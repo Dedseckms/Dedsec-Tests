@@ -19,7 +19,7 @@ public static class Benchmarks
         int workers = multi ? Environment.ProcessorCount : 1; var clock = Stopwatch.StartNew(); long total = 0;
         var tasks = Enumerable.Range(0,workers).Select(_ => Task.Run(() => { long n=0; Span<byte> hash=stackalloc byte[32]; while(clock.Elapsed.TotalSeconds < seconds) { token.ThrowIfCancellationRequested(); SHA256.HashData(Data,hash);if(!hash.SequenceEqual(ExpectedHash))throw new InvalidDataException("CPU SHA-256 output does not match the independent reference digest"); n++; } Interlocked.Add(ref total,n); },token)).ToArray();
         await Task.WhenAll(tasks); clock.Stop();
-        return new(multi?"cpu_multi":"cpu_single", Math.Round(total / clock.Elapsed.TotalSeconds,2), "MiB/s", "ok", $"SHA-256, xorshift32 seeded 1 MiB blocks, every digest verified, {workers} workers; includes scheduling; hardware SHA acceleration allowed", clock.Elapsed.TotalSeconds);
+        return new(multi?"cpu_multi":"cpu_single", Math.Round(total / clock.Elapsed.TotalSeconds,2), "MiB/s", "ok", $"SHA-256, xorshift32 seeded 1 MiB blocks, every digest verified, {workers} workers; completed {total} blocks × 1048576 bytes; includes scheduling; hardware SHA acceleration allowed", clock.Elapsed.TotalSeconds);
     }
     public static Measurement MemoryCopy(CancellationToken token, double seconds = 4)
     {
@@ -28,7 +28,7 @@ public static class Benchmarks
         var a=new byte[size]; var b=new byte[size]; new Random(0xDED).NextBytes(a); Buffer.BlockCopy(a,0,b,0,size); var watch=Stopwatch.StartNew(); long passes=0;
         while(watch.Elapsed.TotalSeconds<seconds) { token.ThrowIfCancellationRequested(); Buffer.BlockCopy(a,0,b,0,size); passes++; }
         watch.Stop(); if (!a.AsSpan().SequenceEqual(b)) throw new InvalidDataException("RAM copy verification failed");
-        return new("ram_copy",Math.Round(passes*64/watch.Elapsed.TotalSeconds,2),"MiB/s","ok","64 MiB copy, one thread, source bytes counted once; includes cache effects",watch.Elapsed.TotalSeconds);
+        return new("ram_copy",Math.Round(passes*64/watch.Elapsed.TotalSeconds,2),"MiB/s","ok",$"64 MiB copy, one thread, source bytes counted once; completed {passes} copies × 67108864 bytes; includes cache effects",watch.Elapsed.TotalSeconds);
     }
     public static Measurement MemoryVerify(CancellationToken token)
     {

@@ -21,6 +21,8 @@ public sealed class Report
     public string? ResultUrl { get; set; }
     public string? DeleteToken { get; set; }
     public bool Completed { get; set; }
+    public DateTime? PublicationAttemptUtc { get; set; }
+    public string? PublicationError { get; set; }
     public object PublicPayload() => new { suite_version = SuiteVersion, app_version = AppVersion, profile = Profile, system = System, measurements = Measurements.ConvertAll(m=>m.Status=="ok"?m:m with { Detail="Unsupported or unavailable; see local report" }), consent = true, consent_version = "2026-11-23" };
 }
 public sealed class Settings

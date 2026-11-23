@@ -10,7 +10,7 @@
 [![Build](https://github.com/Dedseckms/Dedsec-Tests/actions/workflows/ci.yml/badge.svg)](https://github.com/Dedseckms/Dedsec-Tests/actions/workflows/ci.yml)
 [![Windows](https://img.shields.io/badge/Windows-10%20%2F%2011-0078D4?logo=windows)](https://github.com/Dedseckms/Dedsec-Tests/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-C1FA55.svg)](LICENSE)
-[![Preview](https://img.shields.io/badge/Preview-0.1.1-C1FA55)](https://github.com/Dedseckms/Dedsec-Tests/releases)
+[![Preview](https://img.shields.io/badge/Preview-0.1.2-C1FA55)](https://github.com/Dedseckms/Dedsec-Tests/releases)
 
 [**Скачать приложение**](https://github.com/Dedseckms/Dedsec-Tests/releases) · [**Открытая таблица**](https://tests.dedseckms.ru) · [Методика](https://tests.dedseckms.ru/methodology) · [Сообщить об ошибке](https://github.com/Dedseckms/Dedsec-Tests/issues)
 

@@ -1,6 +1,14 @@
 # Validation — 23 November 2026
 
-This is **0.1.1 Preview** for owner review. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+This is **0.1.2 Preview** for owner review. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+
+## 0.1.2 publication, live tables and measured display
+
+- Reproduced the reported `Transfer encoding unsupported` error with the original .NET `PostAsJsonAsync` against the actual production Python handler in an isolated database. The new production publisher sends an explicit Content-Length, confirms ownership, reads the stored result back and compares the configuration/measurements with the sent JSON. Retry returns the same ID. Twenty checks passed in that integration run, including cleanup; the isolated registry was empty afterwards.
+- The production .NET publisher also passed through the public HTTPS/Caddy/tunnel/backend route, with exact raw-value readback, idempotent retry and token deletion. This was a clearly labelled disposable synthetic transport fixture; it was deleted, not retained as a hardware benchmark.
+- Eighteen checks passed with actual WPF application resources: values change in the existing DataGrid while scroll offset and selected PID persist. Dark table/selection/scrollbar resources were rendered and visually inspected (`artifacts/ui-dark-grid.png`). This is local UI evidence, not physical testing of every display/DPI.
+- Twenty-six checks passed with current physical CPU/GPU/RAM/file-disk operations, including independent SHA checks and GPU hardware timestamps. Ten backend tests and JavaScript DT/unit-conversion checks passed. These counts overlap; do not add them as independent tests.
+- DT points and compact units are computed only for valid successful measured throughput. Skipped/non-finite/untimed values, error counts and latency cannot become throughput scores. JSON values and API units remain unchanged.
 
 ## 0.1.1 NVMe temperature correction
 

@@ -46,7 +46,7 @@ public static class GpuBenchmark
             while(clock.Elapsed.TotalSeconds<seconds){double elapsed=Batch(batch);gpuSeconds+=elapsed;passes+=batch;batch=Math.Clamp((int)Math.Round(batch*.05/elapsed),1,4096);}clock.Stop();
             context.CSSetUnorderedAccessView(0,null); context.CopyResource(staging,buffer); var map=context.Map(staging,MapMode.Read,Vortice.Direct3D11.MapFlags.None);
             try { var values=new ReadOnlySpan<uint>((void*)map.DataPointer,65536); for(uint i=0;i<65536;i++){uint expected=i+1;for(int j=0;j<256;j++){expected^=expected<<13;expected^=expected>>17;expected^=expected<<5;}if(values[(int)i]!=expected)throw new InvalidOperationException("GPU integer output verification failed");} } finally{context.Unmap(staging,0);}
-            return new("gpu_compute",Math.Round(passes*65536d*256/gpuSeconds/1e6,2),"Miter/s","ok",$"{adapter.Description1.Description.TrimEnd('\0')}; D3D11 FL11; GPU timestamps; 65536 lanes × 256 xorshift32 iterations; adaptive 50 ms batches; integer outputs verified; wall sample {clock.Elapsed.TotalSeconds:F2}s; not game FPS",gpuSeconds);
+            return new("gpu_compute",Math.Round(passes*65536d*256/gpuSeconds/1e6,2),"Miter/s","ok",$"{adapter.Description1.Description.TrimEnd('\0')}; D3D11 FL11; GPU timestamps; completed {passes} dispatches × 65536 lanes × 256 xorshift32 iterations; adaptive 50 ms batches; integer outputs verified; wall sample {clock.Elapsed.TotalSeconds:F2}s; not game FPS",gpuSeconds);
         }
     }
 }

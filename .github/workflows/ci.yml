@@ -19,6 +19,7 @@ jobs:
       - run: python -m unittest -v test_app.py
         working-directory: server
       - run: node --check server/web/app.js
+      - run: node scripts/Test-Display.cjs
   windows:
     runs-on: windows-latest
     strategy:
@@ -30,6 +31,8 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - run: dotnet run --project tests/Dedsec.Tests.Checks -c Release
+      - run: python scripts/Test-ClientPublication.py
+      - run: dotnet run --no-build --project tests/Dedsec.Tests.Checks -c Release -- --ui
       - run: dotnet publish src/Dedsec.Tests -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
       - run: dotnet publish src/Dedsec.Tests.Updater -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
       - run: ./scripts/Copy-Licenses.ps1 -Target artifacts/app
