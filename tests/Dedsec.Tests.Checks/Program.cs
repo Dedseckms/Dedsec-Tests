@@ -11,6 +11,7 @@ int passed=0;
 void Check(bool ok,string name){if(!ok)throw new Exception(name);Console.WriteLine("PASS "+name);passed++;}
 using(var cancel=new CancellationTokenSource()){cancel.Cancel();try{await Benchmarks.Cpu(true,cancel.Token,.1);throw new Exception("Cancellation ignored");}catch(OperationCanceledException){Check(true,"CPU cancellation observed");}}
 var cpu=await Benchmarks.Cpu(false,CancellationToken.None,.15);Check(cpu.Value>0&&cpu.Seconds>=.15,"CPU returns timed finite throughput");
+var dataset=(byte[])typeof(Benchmarks).GetField("Data",BindingFlags.NonPublic|BindingFlags.Static)!.GetValue(null)!;byte original=dataset[0];dataset[0]^=1;try{await Benchmarks.Cpu(false,CancellationToken.None,.1);throw new Exception("Corrupt SHA payload accepted");}catch(InvalidDataException){Check(true,"CPU digest mismatch fails instead of producing a score");}finally{dataset[0]=original;}
 var info=new SystemInfo("CPU",4,"GPU",8,"Windows 11","X64",new());var report=new Report{System=info,Findings=new(){new("warning","secret user path","C:\\Users\\private-name","local")},DeleteToken="do-not-share",ResultUrl="https://example.test",Measurements=new(){new("gpu_compute",0,"Miter/s","skipped","C:\\Users\\private-name",0)}};
 string payload=JsonSerializer.Serialize(report.PublicPayload(),Json.Options);Check(!payload.Contains("private-name")&&!payload.Contains("do-not-share")&&!payload.Contains("findings")&&!payload.Contains("result_url"),"Public projection excludes local diagnostics, keys and exception paths");
 Check(Diagnostics.Live(new(){new("CPU","Package","Temperature",98,"°C")},new(),90).Any(f=>f.Severity=="critical"),"High temperature produces actionable alert");
@@ -19,9 +20,10 @@ Check(ErrorCodes.Explain("0x80070005",false).Contains("(5)"),"HRESULT_FROM_WIN32
 Check(ErrorCodes.Explain("0x124",true).Contains("WHEA_UNCORRECTABLE_ERROR")&&!ErrorCodes.Explain("0x124",false).Contains("WHEA_UNCORRECTABLE_ERROR"),"BSOD and Win32 numeric domains stay separate");
 if(args.Contains("--hardware"))
 {
+    var multi=await Benchmarks.Cpu(true,CancellationToken.None,.25);Check(multi.Status=="ok"&&multi.Value>0,"All-logical-CPU workers verify SHA digests and return throughput");
     var ram=Benchmarks.MemoryVerify(CancellationToken.None);Check(ram.Status=="ok"&&ram.Value==0,"Allocated RAM integrity patterns");
     var copy=Benchmarks.MemoryCopy(CancellationToken.None,.2);Check(copy.Value>0,"RAM copy throughput");
-    var gpu=GpuBenchmark.Run(0,.5,CancellationToken.None);Check(gpu.Status=="ok"&&gpu.Value>0,"D3D11 dispatch and all integer outputs verified");
+    var gpuClock=System.Diagnostics.Stopwatch.StartNew();var gpu=GpuBenchmark.Run(0,.5,CancellationToken.None);Check(gpu.Status=="ok"&&gpu.Value>0,"D3D11 dispatch and all integer outputs verified");Check(gpu.Detail.Contains("GPU timestamps")&&gpu.Seconds>0&&gpu.Seconds<=gpuClock.Elapsed.TotalSeconds+.01,"GPU throughput uses valid hardware timestamps, not CPU sleep duration");
     var disk=Benchmarks.Disk(Path.GetPathRoot(Environment.SystemDirectory)!,CancellationToken.None);Check(disk.Count==3&&disk.All(m=>m.Value>0&&m.Status=="ok"),"Unbuffered 256 MiB write/read/verify/random reads");
     var before=Directory.GetDirectories(Path.GetPathRoot(Environment.SystemDirectory)!,"DedsecTests-*").Length;using var cancel=new CancellationTokenSource();cancel.Cancel();try{Benchmarks.Disk(Path.GetPathRoot(Environment.SystemDirectory)!,cancel.Token);}catch(OperationCanceledException){}
     Check(Directory.GetDirectories(Path.GetPathRoot(Environment.SystemDirectory)!,"DedsecTests-*").Length==before,"Cancelled disk test cleans only its temporary directory");

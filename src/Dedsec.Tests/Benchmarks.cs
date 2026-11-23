@@ -12,13 +12,14 @@ namespace Dedsec.Tests;
 public static class Benchmarks
 {
     private static readonly byte[] Data = MakeData();
-    private static byte[] MakeData() { var a = new byte[1048576]; new Random(0xDED).NextBytes(a); return a; }
+    private static readonly byte[] ExpectedHash=Convert.FromHexString("4C504B067EE56397A22A33527C9A6E29D9B2208BDB1B09594B4D146E0D177869");
+    private static byte[] MakeData() { var a=new byte[1048576];uint seed=0xDED;for(int i=0;i<a.Length;i++){seed^=seed<<13;seed^=seed>>17;seed^=seed<<5;a[i]=(byte)seed;}return a; }
     public static async Task<Measurement> Cpu(bool multi, CancellationToken token, double seconds = 5)
     {
         int workers = multi ? Environment.ProcessorCount : 1; var clock = Stopwatch.StartNew(); long total = 0;
-        var tasks = Enumerable.Range(0,workers).Select(_ => Task.Run(() => { long n=0; Span<byte> hash=stackalloc byte[32]; while(clock.Elapsed.TotalSeconds < seconds) { token.ThrowIfCancellationRequested(); SHA256.HashData(Data,hash); n++; } Interlocked.Add(ref total,n); },token)).ToArray();
+        var tasks = Enumerable.Range(0,workers).Select(_ => Task.Run(() => { long n=0; Span<byte> hash=stackalloc byte[32]; while(clock.Elapsed.TotalSeconds < seconds) { token.ThrowIfCancellationRequested(); SHA256.HashData(Data,hash);if(!hash.SequenceEqual(ExpectedHash))throw new InvalidDataException("CPU SHA-256 output does not match the independent reference digest"); n++; } Interlocked.Add(ref total,n); },token)).ToArray();
         await Task.WhenAll(tasks); clock.Stop();
-        return new(multi?"cpu_multi":"cpu_single", Math.Round(total / clock.Elapsed.TotalSeconds,2), "MiB/s", "ok", $"SHA-256, 1 MiB blocks, {workers} workers; includes scheduling; hardware SHA acceleration allowed", clock.Elapsed.TotalSeconds);
+        return new(multi?"cpu_multi":"cpu_single", Math.Round(total / clock.Elapsed.TotalSeconds,2), "MiB/s", "ok", $"SHA-256, xorshift32 seeded 1 MiB blocks, every digest verified, {workers} workers; includes scheduling; hardware SHA acceleration allowed", clock.Elapsed.TotalSeconds);
     }
     public static Measurement MemoryCopy(CancellationToken token, double seconds = 4)
     {

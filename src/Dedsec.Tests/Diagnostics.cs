@@ -73,7 +73,7 @@ public static class Diagnostics
                     groups[key]=(1,id,provider,record.TimeCreated,message[..Math.Min(message.Length,1800)]);
                 }
                 findings.Add(new("info",$"Журнал {channel}: проверен интервал 7 дней",$"Прочитано {read} записей уровней Critical/Error/Warning; лимит 1200 записей или 8 секунд. Одинаковые provider + Event ID сгруппированы.","Это ограниченная выборка, а не полная история. События могут описывать уже устранённые сбои. Локальные сообщения не отправляются на сайт."));
-                foreach(var item in groups.Values.OrderByDescending(g=>g.Count).Take(24))
+                foreach(var item in groups.Values.OrderByDescending(g=>Explain(g.Provider,g.Id).Severity switch{"critical"=>3,"warning"=>2,_=>1}).ThenByDescending(g=>g.Count).Take(24))
                 {
                     var (severity,title,meaning,solution)=Explain(item.Provider,item.Id);
                     findings.Add(new(severity,$"{title} · Event {item.Id}",$"{channel} / {item.Provider}; записей в выборке: {item.Count}; последнее: {item.Time:dd.MM.yyyy HH:mm}.\n{meaning}\n\nСообщение Windows (локально):\n{item.Message}",solution,WindowsHelp));

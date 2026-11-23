@@ -26,13 +26,27 @@ public static class GpuBenchmark
             using var buffer=device.CreateBuffer(65536*4,BindFlags.UnorderedAccess,ResourceUsage.Default,CpuAccessFlags.None,ResourceOptionFlags.BufferStructured,4);
             using var view=device.CreateUnorderedAccessView(buffer);
             using var staging=device.CreateBuffer(65536*4,BindFlags.None,ResourceUsage.Staging,CpuAccessFlags.Read);
-            using var query=device.CreateQuery(new QueryDescription(QueryType.Event));
+            using var disjoint=device.CreateQuery(new QueryDescription(QueryType.TimestampDisjoint));
+            using var startQuery=device.CreateQuery(new QueryDescription(QueryType.Timestamp));
+            using var endQuery=device.CreateQuery(new QueryDescription(QueryType.Timestamp));
+            using var dxgiDevice=device.QueryInterface<IDXGIDevice2>();
+            using var completed=new EventWaitHandle(false,EventResetMode.AutoReset);
+            var waits=new WaitHandle[]{completed,token.WaitHandle};
             context.CSSetShader(shader); context.CSSetUnorderedAccessView(0,view);
-            void DispatchAndWait() { token.ThrowIfCancellationRequested(); context.Dispatch(1024,1,1); context.End(query); context.Flush(); var deadline=Stopwatch.StartNew(); while(!context.GetData(query,out int done) || done==0) { token.ThrowIfCancellationRequested(); if(deadline.Elapsed.TotalSeconds>8) throw new TimeoutException("GPU completion timed out"); Thread.Sleep(1); } }
-            DispatchAndWait(); var clock=Stopwatch.StartNew(); long passes=0; while(clock.Elapsed.TotalSeconds<seconds){DispatchAndWait();passes++;} clock.Stop();
+            double Batch(int count)
+            {
+                token.ThrowIfCancellationRequested();context.Begin(disjoint);context.End(startQuery);
+                for(int i=0;i<count;i++)context.Dispatch(1024,1,1);
+                context.End(endQuery);context.End(disjoint);context.Flush();dxgiDevice.EnqueueSetEvent(completed.SafeWaitHandle.DangerousGetHandle());
+                int wait=WaitHandle.WaitAny(waits,TimeSpan.FromSeconds(8));if(wait==1)token.ThrowIfCancellationRequested();if(wait==WaitHandle.WaitTimeout)throw new TimeoutException("GPU completion timed out");
+                if(!context.GetData(disjoint,out QueryDataTimestampDisjoint timing)||timing.Disjoint||timing.Frequency==0||!context.GetData(startQuery,out ulong start)||!context.GetData(endQuery,out ulong end)||end<=start)throw new InvalidOperationException("GPU timestamps unavailable or disjoint; no trustworthy timing");
+                return (end-start)/(double)timing.Frequency;
+            }
+            int batch=16;Batch(batch);var clock=Stopwatch.StartNew();long passes=0;double gpuSeconds=0;
+            while(clock.Elapsed.TotalSeconds<seconds){double elapsed=Batch(batch);gpuSeconds+=elapsed;passes+=batch;batch=Math.Clamp((int)Math.Round(batch*.05/elapsed),1,4096);}clock.Stop();
             context.CSSetUnorderedAccessView(0,null); context.CopyResource(staging,buffer); var map=context.Map(staging,MapMode.Read,Vortice.Direct3D11.MapFlags.None);
             try { var values=new ReadOnlySpan<uint>((void*)map.DataPointer,65536); for(uint i=0;i<65536;i++){uint expected=i+1;for(int j=0;j<256;j++){expected^=expected<<13;expected^=expected>>17;expected^=expected<<5;}if(values[(int)i]!=expected)throw new InvalidOperationException("GPU integer output verification failed");} } finally{context.Unmap(staging,0);}
-            return new("gpu_compute",Math.Round(passes*65536d*256/clock.Elapsed.TotalSeconds/1e6,2),"Miter/s","ok",$"{adapter.Description1.Description.TrimEnd('\0')}; D3D11 FL11; 65536 lanes × 256 xorshift32 iterations; integer output verified; not game FPS",clock.Elapsed.TotalSeconds);
+            return new("gpu_compute",Math.Round(passes*65536d*256/gpuSeconds/1e6,2),"Miter/s","ok",$"{adapter.Description1.Description.TrimEnd('\0')}; D3D11 FL11; GPU timestamps; 65536 lanes × 256 xorshift32 iterations; adaptive 50 ms batches; integer outputs verified; wall sample {clock.Elapsed.TotalSeconds:F2}s; not game FPS",gpuSeconds);
         }
     }
 }
