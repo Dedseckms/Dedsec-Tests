@@ -28,10 +28,12 @@ public static class Inventory
         var physical = Query("root\\Microsoft\\Windows\\Storage", "SELECT FriendlyName,MediaType,Size FROM MSFT_PhysicalDisk");
         // FriendlyName may be user-assigned. Publish the hardware Model, never a friendly label.
         disks=disks.Select(d=>{var matches=physical.Where(p=>Text(p,"FriendlyName").Equals(d.Model,StringComparison.OrdinalIgnoreCase)&&Math.Abs(Number(p,"Size")/1e9-d.CapacityGb)<2).ToList();return matches.Count==1?d with {Media=Number(matches[0],"MediaType") switch{3=>"HDD",4=>"SSD",5=>"SCM",_=>"Unknown"}}:d;}).ToList();
-        return new(Text(cpu,"Name"), Environment.ProcessorCount, string.Join(" / ", gpu.Select(x => Text(x,"Name"))), (int)Math.Round(Memory().Total / 1073741824d), $"{Text(os,"Caption")} · {Text(os,"Version")} (build {Text(os,"BuildNumber")})", RuntimeInformation.OSArchitecture.ToString(), disks.Take(16).ToList());
+        ulong installed=GetPhysicallyInstalledSystemMemory(out ulong installedKb)&&installedKb>0?installedKb*1024:Memory().Total;
+        return new(Text(cpu,"Name"), Environment.ProcessorCount, string.Join(" / ", gpu.Select(x => Text(x,"Name"))), (int)Math.Round(installed / 1073741824d), $"{Text(os,"Caption")} · {Text(os,"Version")} (build {Text(os,"BuildNumber")})", RuntimeInformation.OSArchitecture.ToString(), disks.Take(16).ToList());
     }
     [StructLayout(LayoutKind.Sequential)] private struct MemoryStatus { public uint Length, Load; public ulong Total, Available, PageTotal, PageAvailable, VirtualTotal, VirtualAvailable, Extended; }
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
+    [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GetPhysicallyInstalledSystemMemory(out ulong totalKilobytes);
     public static (ulong Total, ulong Available, uint Load) Memory() { var s = new MemoryStatus { Length = (uint)Marshal.SizeOf<MemoryStatus>() }; if (!GlobalMemoryStatusEx(ref s)) return (0,0,0); return (s.Total,s.Available,s.Load); }
     public static List<Finding> Diagnose(SystemInfo info)
     {

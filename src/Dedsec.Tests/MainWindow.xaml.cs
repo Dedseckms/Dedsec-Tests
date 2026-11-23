@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent(); BuildNavigation(); ApplyAppearance();
+        var workArea=SystemParameters.WorkArea;MinWidth=Math.Min(MinWidth,workArea.Width);MinHeight=Math.Min(MinHeight,workArea.Height);Width=Math.Min(Width,workArea.Width);Height=Math.Min(Height,workArea.Height);
         tray.Text="Dedsec Tests"; tray.Icon=System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!); tray.DoubleClick+=(_,_)=>Dispatcher.Invoke(Restore);
         StateChanged+=(_,_)=>{if(WindowState==WindowState.Minimized&&settings.Tray){Hide();tray.Visible=true;}};
         var menu=new Forms.ContextMenuStrip(); menu.Items.Add("Открыть",null,(_,_)=>Dispatcher.Invoke(Restore)); menu.Items.Add("Остановить тест",null,(_,_)=>Dispatcher.Invoke(()=>run?.Cancel())); menu.Items.Add("Выход",null,(_,_)=>Dispatcher.Invoke(()=>{exiting=true;Close();})); tray.ContextMenuStrip=menu;
