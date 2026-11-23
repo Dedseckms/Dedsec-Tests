@@ -32,6 +32,7 @@ jobs:
       - run: dotnet run --project tests/Dedsec.Tests.Checks -c Release
       - run: dotnet publish src/Dedsec.Tests -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
       - run: dotnet publish src/Dedsec.Tests.Updater -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
+      - run: ./scripts/Copy-Licenses.ps1 -Target artifacts/app
       - uses: actions/upload-artifact@v4
         with:
           name: DedsecTests-win-${{ matrix.arch }}
