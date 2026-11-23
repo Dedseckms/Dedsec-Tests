@@ -1,0 +1,22 @@
+name: Ошибка или несовместимое оборудование
+description: Сообщить об ошибке Dedsec Tests без персональных данных
+body:
+  - type: markdown
+    attributes:
+      value: Не прикладывайте ключ удаления, полный локальный JSON, дамп памяти, серийные номера или личные данные. Отчёт HTML тоже проверьте перед отправкой.
+  - type: input
+    id: version
+    attributes:
+      label: Версия приложения и Windows
+    validations:
+      required: true
+  - type: textarea
+    id: hardware
+    attributes:
+      label: CPU, GPU, RAM и тип накопителя
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Что произошло и как повторить
+    validations:
+      required: true

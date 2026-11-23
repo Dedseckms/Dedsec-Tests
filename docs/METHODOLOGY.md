@@ -1,0 +1,21 @@
+# Methodology: dedsec-v1
+
+The public [methodology page](https://tests.dedseckms.ru/methodology) defines the exact CPU SHA-256, GPU xorshift32, RAM and disk workloads. Source lives in `src/Dedsec.Tests/Benchmarks.cs` and `GpuBenchmark.cs`. Warmup, payload size, worker count, units and elapsed time matter; results from changed workloads require a new suite version. There is no composite score or claim that one workload predicts all applications.
+
+GPU work is submitted only to a user-selected hardware DXGI adapter with D3D11 feature level 11.0. Each completed dispatch runs 65,536 lanes of 256 dependent xorshift32 iterations. The timed loop waits for actual GPU completion, and every uint output is subsequently checked against a CPU reference. A separate child with a timeout and kill-on-close Job Object prevents continued GPU work after the parent exits. Scheduling overhead is included. This is not a render/VRAM/game-FPS test.
+
+Disks are tested through an owned temporary file, with unbuffered/write-through I/O and 4096-byte aligned buffers. Reads verify all bytes. Device caches, filesystem/encryption and the small working set still matter. A requested system volume uses an accessible user temporary directory on that volume; a selected directory can be used on other volumes. No raw disk or existing user file is written. The listed physical-disk inventory is not automatically equated with the selected logical volume.
+
+Diagnostics are bounded observations, not a guarantee of health. WMI unavailability is distinct from an all-clear. Event reader queries seven days of System/Application Critical/Error/Warning events, up to 1,200 per channel or eight seconds, and groups source + Event ID. Explanations are curated possible causes and next steps. They do not assign hardware blame from a single event. Event messages can contain local personal paths and are never part of the publication payload.
+
+Primary references used for the diagnostic explanations and compatibility decisions:
+
+- [Microsoft: unexpected restart and Event ID 41](https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/event-id-41-restart).
+- [Microsoft: troubleshooting unexpected reboots](https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-unexpected-reboots-system-event-logs).
+- [Microsoft: WHEA hardware error events](https://learn.microsoft.com/en-us/windows-hardware/drivers/whea/whea-hardware-error-events).
+- [Microsoft: stop errors and restart diagnostics](https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-stop-errors-guidance).
+- [.NET 10 supported systems](https://github.com/dotnet/core/blob/main/release-notes/10.0/supported-os.md). .NET/Windows vendor support status is separate from whether the application launches on an older Windows installation.
+- [LibreHardwareMonitor source and supported sensor model](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor).
+- [Vortice Direct3D bindings](https://github.com/amerkoleci/Vortice.Windows).
+
+The local decoder distinguishes Win32/HRESULT from BSOD STOP codes. Unknown providers/codes receive an explicit context-needed explanation instead of an invented definitive repair.

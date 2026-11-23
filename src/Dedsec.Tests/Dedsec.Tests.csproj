@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>disable</ImplicitUsings><AllowUnsafeBlocks>true</AllowUnsafeBlocks><AssemblyName>Dedsec.Tests</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest><ApplicationIcon Condition="Exists('Assets/app.ico')">Assets/app.ico</ApplicationIcon><Product>Dedsec Tests</Product>
+    <SatelliteResourceLanguages>ru;en</SatelliteResourceLanguages>
+    <NoWarn>$(NoWarn);WFO0003</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../UpdateTrust.cs" Link="UpdateTrust.cs" />
+    <EmbeddedResource Include="../UpdatePublicKey.pem" LogicalName="UpdatePublicKey.pem" />
+    <PackageReference Include="System.Management" Version="10.0.2" />
+    <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.8.3" />
+    <Resource Include="Assets/*.png" />
+    <Content Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../LICENSE-RU.txt" Link="LICENSE-RU.txt" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

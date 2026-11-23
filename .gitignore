@@ -1,0 +1,12 @@
+**/bin/
+**/obj/
+.tools/
+artifacts/
+__pycache__/
+*.sqlite*
+*.user
+.env
+*.key
+*.pem
+!src/UpdatePublicKey.pem
+.local/
