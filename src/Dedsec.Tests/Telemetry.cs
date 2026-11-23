@@ -19,7 +19,17 @@ public sealed class Telemetry : IDisposable
     }
     private static void Visit(IHardware h, List<SensorRow> list)
     {
-        h.Update(); foreach (var s in h.Sensors) if (s.Value is float value && float.IsFinite(value)) list.Add(new(h.Name,s.Name,s.SensorType.ToString(),value,s.SensorType switch { SensorType.Temperature => "°C", SensorType.Load => "%", SensorType.Clock => "MHz", SensorType.Power => "W", SensorType.Fan => "RPM", SensorType.Data => "GB", SensorType.SmallData => "MB", _ => "" })); foreach (var child in h.SubHardware) Visit(child,list);
+        h.Update(); foreach (var s in h.Sensors) if (s.Value is float value && float.IsFinite(value)) list.Add(MapSensor(h.Name,s.Name,h.HardwareType,s.SensorType,s.Index,value)); foreach (var child in h.SubHardware) Visit(child,list);
+    }
+    public static SensorRow MapSensor(string device,string name,HardwareType hardwareType,SensorType sensorType,int index,float value)
+    {
+        // LHM 0.9.6 StorageDevice exposes NVMe SMART warning/critical limits as
+        // Temperature at indices 10/11. They are configuration, never readings.
+        // Match provider indices, not display names (which can be renamed).
+        bool limit=hardwareType==HardwareType.Storage&&sensorType==SensorType.Temperature&&(index==10||index==11);
+        return new(device,limit?(index==10?"Порог предупреждения NVMe":"Критический порог NVMe"):name,
+            limit?"TemperatureLimit":sensorType.ToString(),value,
+            sensorType switch { SensorType.Temperature => "°C", SensorType.Load => "%", SensorType.Clock => "MHz", SensorType.Power => "W", SensorType.Fan => "RPM", SensorType.Data => "GB", SensorType.SmallData => "MB", _ => "" });
     }
     public List<ProcessRow> Processes()
     {

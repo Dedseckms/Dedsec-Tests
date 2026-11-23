@@ -16,6 +16,16 @@ var info=new SystemInfo("CPU",4,"GPU",8,"Windows 11","X64",new());var report=new
 string payload=JsonSerializer.Serialize(report.PublicPayload(),Json.Options);Check(!payload.Contains("private-name")&&!payload.Contains("do-not-share")&&!payload.Contains("findings")&&!payload.Contains("result_url"),"Public projection excludes local diagnostics, keys and exception paths");
 Check(Diagnostics.Live(new(){new("CPU","Package","Temperature",98,"°C")},new(),90).Any(f=>f.Severity=="critical"),"High temperature produces actionable alert");
 Check(Diagnostics.Live(new(),new(),90).Any(f=>f.Severity=="unknown"),"Missing sensors never become an all-clear");
+var ssd=Telemetry.MapSensor("Kingston NV1","Composite Temperature",LibreHardwareMonitor.Hardware.HardwareType.Storage,LibreHardwareMonitor.Hardware.SensorType.Temperature,0,36);
+var warningLimit=Telemetry.MapSensor("Kingston NV1","Warning Temperature",LibreHardwareMonitor.Hardware.HardwareType.Storage,LibreHardwareMonitor.Hardware.SensorType.Temperature,10,84);
+var criticalLimit=Telemetry.MapSensor("Kingston NV1","Critical Temperature",LibreHardwareMonitor.Hardware.HardwareType.Storage,LibreHardwareMonitor.Hardware.SensorType.Temperature,11,94);
+var driveSensors=new List<SensorRow>{ssd,warningLimit,criticalLimit};
+Check(driveSensors.Where(s=>s.Type=="Temperature").Max(s=>s.Value)==36&&warningLimit.Value==84&&criticalLimit.Value==94,"NVMe thresholds stay visible but cannot become live maximum, graph, peak or thermal-stop inputs");
+Check(!Diagnostics.Live(driveSensors,new(),90).Any(f=>f.Title=="Высокая температура"),"NVMe warning/critical limits cannot generate overheating alerts");
+Check(Diagnostics.Live(new(){warningLimit,criticalLimit},new(),90).Any(f=>f.Severity=="unknown"),"Thresholds alone never establish temperature monitoring availability");
+var hotSsd=Telemetry.MapSensor("Kingston NV1","Temperature #2",LibreHardwareMonitor.Hardware.HardwareType.Storage,LibreHardwareMonitor.Hardware.SensorType.Temperature,2,84);
+Check(Diagnostics.Live(new(){hotSsd},new(),90).Any(f=>f.Title=="Высокая температура"),"Real 84 degree SSD reading remains visible and warns");
+Check(Telemetry.MapSensor("CPU","Core 10",LibreHardwareMonitor.Hardware.HardwareType.Cpu,LibreHardwareMonitor.Hardware.SensorType.Temperature,10,98).Type=="Temperature","CPU temperature index 10 is not an NVMe threshold");
 Check(ErrorCodes.Explain("0x80070005",false).Contains("(5)"),"HRESULT_FROM_WIN32 unwraps access-denied code");
 Check(ErrorCodes.Explain("0x124",true).Contains("WHEA_UNCORRECTABLE_ERROR")&&!ErrorCodes.Explain("0x124",false).Contains("WHEA_UNCORRECTABLE_ERROR"),"BSOD and Win32 numeric domains stay separate");
 if(args.Contains("--hardware"))

@@ -1,6 +1,12 @@
 # Validation — 23 November 2026
 
-This is **0.1.0 Preview** for owner review. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+This is **0.1.1 Preview** for owner review. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+
+## 0.1.1 NVMe temperature correction
+
+Owner reported a constant 84 °C warning on a Kingston NV1. Source inspection of [LibreHardwareMonitor 0.9.6 StorageDevice](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor/blob/v0.9.6/LibreHardwareMonitorLib/Hardware/Storage/StorageDevice.cs) confirmed that NVMe warning and critical temperature **limits** are exposed as `SensorType.Temperature`, indices 10/11. Dedsec Tests 0.1.0 incorrectly included those limits in live temperature aggregation. Version 0.1.1 maps them to `TemperatureLimit`, keeps their values visible with explicit labels, and excludes them from live temperature alerts, monitoring availability, graphs, peak reports and thermal stops. Actual temperature readings, including a real 84 °C reading, remain included. The overview now names the hottest measured sensor. This fixes the aggregation error; the reported physical NV1 still needs an owner check after updating.
+
+Thirteen focused client checks passed, including five regression checks for threshold exclusion, preserved raw limit values, absence of false overheating alerts, unknown monitoring when only limits exist, genuine hot SSD readings and CPU index isolation (some checks cover multiple assertions).
 
 ## Verified locally
 
