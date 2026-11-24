@@ -34,6 +34,10 @@ jobs:
       - run: dotnet run --project tests/Dedsec.Tests.Checks -c Release
       - run: python scripts/Test-ClientPublication.py
       - run: dotnet run --no-build --project tests/Dedsec.Tests.Checks -c Release -- --ui
+      - run: dotnet run --no-build --project tests/Dedsec.Tests.Checks -c Release -- --storage-read
+      - name: Verify storage mutations on a disposable VHD only
+        if: matrix.arch == 'x64'
+        run: ./scripts/Test-StorageVhd.ps1 -AllowVirtualDiskFixture
       - run: dotnet publish src/Dedsec.Tests -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
       - run: dotnet publish src/Dedsec.Tests.Updater -c Release -r win-${{ matrix.arch }} --self-contained true -o artifacts/app
       - run: ./scripts/Copy-Licenses.ps1 -Target artifacts/app

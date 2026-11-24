@@ -1,6 +1,17 @@
-# Validation — 23 November 2026
+# Validation — 24 November 2026
 
-This is **0.1.2 Preview** for owner review. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+This is **0.3.0 Preview** for owner review before 1.0.0. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+
+## 0.3.0 disk manager and consolidated workspace
+
+- Seven unique navigation destinations. Monitoring owns the live charts and raw sensors; diagnostics owns system findings, Windows events, read-only SFC/DISM checks and error-code explanations. Reports show saved run results. Captures exercise the actual application at 1200 × 820 and 920 × 640.
+- Actual Windows inventory and firmware enumeration were read on the development computer. Real DISM CheckHealth completed with exit 0. No physical partition, EFI directory or firmware entry was changed by developer validation.
+- The native storage harness creates and attaches its own expandable 512 MiB VHD. Before each request it verifies the image-to-disk mapping, size and non-system status. It checks GPT initialization, creation, NTFS/exFAT formatting, real shrink/extend, reuse of a deleted adjacent partition, letter changes and SHA-256-verified EFI directory cleanup. Negative cases include stale disk/layout/GPT identity, noncontiguous growth, protected EFI operations, traversal, changed directory preview, application-containing volumes and folder mount points. It detaches the VHD in a finally block.
+- Disk writes require a separate typed target and consent. The native worker rechecks identity and layout. EFI cleanup only accepts FAT/FAT32 GPT EFI volumes, rejects reparse points and preserves Microsoft/Boot. Local journals and backups never enter the public benchmark payload.
+- The automated UI check renders an actual object-backed dark disk selector and verifies that the model is displayed instead of the CLR type name. Publication consent and live-table scroll preservation remain covered. Fourteen isolated registry tests and the real .NET publisher integration remain separate from storage validation.
+- Firmware-entry deletion is an experimental preview feature: enumeration was tested; deleting an entry on a physical machine was not. BCD export does not constitute a complete UEFI NVRAM backup. Shrink/grow uses Windows-supported bounds; there is no partition mover or automatic preservation of files on a partition the user chooses to delete.
+
+Earlier evidence below records the preceding previews; it is not a claim that every check was repeated for 0.3.0.
 
 ## 0.1.2 publication, live tables and measured display
 

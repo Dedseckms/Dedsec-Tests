@@ -9,19 +9,19 @@ using System.Windows.Media;
 namespace Dedsec.Tests;
 public partial class MainWindow
 {
-    private readonly TelemetryHistory timeline=new();private DashboardView? dashboard;private TextBlock? monitorSummary,componentSummary,monitorAlert;private Button? freezeButton;
-    private Dictionary<string,IReadOnlyList<TimelinePoint>>? frozen;private DateTime frozenTime;private bool preparingSensors;private Grid? dashboardHost;
+    private readonly TelemetryHistory timeline=new();private DashboardView? dashboard;private TextBlock? monitorSummary,monitorAlert;private Button? freezeButton;
+    private Dictionary<string,IReadOnlyList<TimelinePoint>>? frozen;private DateTime frozenTime;private bool preparingSensors;private Grid? dashboardHost;private string monitorMode="system";
     private Grid Workspace()
     {
         PageScroll.Visibility=Visibility.Collapsed;FixedPage.Visibility=Visibility.Visible;
         var root=new Grid();FixedPage.Children.Add(root);return root;
     }
     private static void AddRow(Grid root,UIElement child,int row){Grid.SetRow(child,row);root.Children.Add(child);}
-    private void ShowDashboard(bool detailed)
+    private void ShowDashboard()
     {
         var root=Workspace();foreach(var height in new[]{GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto,GridLength.Auto})root.RowDefinitions.Add(new(){Height=height});
-        var heading=new DockPanel{Margin=new Thickness(0,0,0,10)};var title=new StackPanel();title.Children.Add(Txt(detailed?"Мониторинг":"Пульс системы",26));
-        var sub=Txt(detailed?"История измерений · хранится только на этом ПК":info?.Windows??"Определяем систему",11,"#8FA6B7");sub.TextWrapping=TextWrapping.NoWrap;sub.TextTrimming=TextTrimming.CharacterEllipsis;title.Children.Add(sub);
+        var heading=new DockPanel{Margin=new Thickness(0,0,0,10)};var title=new StackPanel();title.Children.Add(Txt("Мониторинг",26));
+        var sub=Txt(info?.Windows??"Определяем систему",11,"#8FA6B7");sub.TextWrapping=TextWrapping.NoWrap;sub.TextTrimming=TextTrimming.CharacterEllipsis;title.Children.Add(sub);
         monitorSummary=Txt("● LIVE",11,"#C1FA55");monitorSummary.HorizontalAlignment=HorizontalAlignment.Right;monitorSummary.VerticalAlignment=VerticalAlignment.Center;DockPanel.SetDock(monitorSummary,Dock.Right);heading.Children.Add(monitorSummary);heading.Children.Add(title);AddRow(root,heading,0);
         var toolbar=new DockPanel{Margin=new Thickness(0,0,0,10)};
         var controls=new StackPanel{Orientation=Orientation.Horizontal};DockPanel.SetDock(controls,Dock.Right);
@@ -31,48 +31,28 @@ public partial class MainWindow
         foreach(var button in new[]{freezeButton,Action("CSV",ExportTelemetry)}){button.Padding=new Thickness(10,6,10,6);button.Margin=new Thickness(0,0,6,0);button.FontSize=11;controls.Children.Add(button);}toolbar.Children.Add(controls);
         var tabs=new StackPanel{Orientation=Orientation.Horizontal};toolbar.Children.Add(tabs);
         dashboardHost=new Grid();AddRow(root,dashboardHost,2);
-        void Graphs(params string[] keys){liveGrid=null;dashboardHost.Children.Clear();componentSummary=null;dashboard=new DashboardView(keys);dashboardHost.Children.Add(dashboard);RefreshDashboard();}
-        if(detailed)
-        {
-            void Tab(string text,System.Action action)=>TabAction(tabs,text,action);
-            Tab("Основные",()=>Graphs("cpu","gpu","ram","storage"));Tab("Ещё графики",()=>Graphs("disk","network","power","fans"));Tab("Все датчики",ShowSensorTable);Tab("Компонент",ShowSensorComponent);
-            Graphs("cpu","gpu","ram","storage");
-        }
-        else
-        {
-            var note=Txt("Загрузка и температура · раздельные графики",11,"#91A7B8");note.VerticalAlignment=VerticalAlignment.Center;note.TextWrapping=TextWrapping.NoWrap;note.TextTrimming=TextTrimming.CharacterEllipsis;tabs.Children.Add(note);Graphs("cpu","gpu","ram","disk");
-        }
+        void Graphs(params string[] keys){liveGrid=null;dashboardHost.Children.Clear();dashboard=new DashboardView(keys);dashboardHost.Children.Add(dashboard);RefreshDashboard();}
+        foreach(var mode in new[]{("system","Компоненты"),("activity","Активность"),("raw","Датчики")})
+        {var selected=mode;TabAction(tabs,mode.Item2,()=>{monitorMode=selected.Item1;RenderMode();},monitorMode==mode.Item1);}
+        void RenderMode(){if(monitorMode=="raw")ShowSensorTable();else if(monitorMode=="activity")Graphs("disk","network","power","fans");else Graphs("cpu","gpu","ram","storage");}
+        RenderMode();
         AddRow(root,toolbar,1);
         monitorAlert=Txt("",11,"#FFBF7F",new Thickness(0,8,0,0));monitorAlert.TextWrapping=TextWrapping.NoWrap;monitorAlert.TextTrimming=TextTrimming.CharacterEllipsis;monitorAlert.Visibility=Visibility.Collapsed;AddRow(root,monitorAlert,3);
         var footer=new DockPanel{Margin=new Thickness(0,12,0,0)};
-        if(!detailed)
-        {
-            var actions=new StackPanel{Orientation=Orientation.Horizontal};foreach(var button in new[]{Action("Автотест",async()=>await Start("auto"),true),Action("Диагностика",async()=>await Scan()),Action("Датчики",PrepareSensors),Action("Отчёты",()=>ShowPage("reports"))}){button.Padding=new Thickness(15,10,15,10);button.Margin=new Thickness(0,0,7,0);button.FontSize=12;actions.Children.Add(button);}footer.Children.Add(actions);
-        }
-        else
-        {
-            var clear=Action("Очистить историю",()=>{timeline.Clear();frozen=null;freezeButton.Content="Пауза";RefreshDashboard();});clear.Padding=new Thickness(12,7,12,7);clear.FontSize=11;clear.Margin=new Thickness(0);DockPanel.SetDock(clear,Dock.Right);footer.Children.Add(clear);footer.Children.Add(Txt("Наведите курсор на график: время и измеренное значение",11,"#8298A9"));
-        }
+        var clear=Action("Очистить историю",()=>{timeline.Clear();frozen=null;freezeButton.Content="Пауза";RefreshDashboard();});clear.Padding=new Thickness(12,7,12,7);clear.FontSize=11;clear.Margin=new Thickness(0);DockPanel.SetDock(clear,Dock.Right);footer.Children.Add(clear);footer.Children.Add(Txt("История только на этом ПК · курсор на графике показывает время и значение",11,"#8298A9"));
         AddRow(root,footer,4);RefreshDashboard();
     }
     private void ShowSensorTable()
     {
-        if(dashboardHost==null)return;dashboard=null;componentSummary=null;dashboardHost.Children.Clear();sensorRows.Clear();foreach(var row in sensors)sensorRows.Add(row);
+        if(dashboardHost==null)return;dashboard=null;dashboardHost.Children.Clear();sensorRows.Clear();foreach(var row in sensors)sensorRows.Add(row);
         liveGrid=new DataGrid{ItemsSource=sensorRows,AutoGenerateColumns=false,IsReadOnly=true,CanUserAddRows=false,RowHeight=30};
         foreach(var column in new[]{("Устройство","Device"),("Датчик","Name"),("Тип","Type"),("Значение","Value"),("Ед.","Unit")})liveGrid.Columns.Add(new DataGridTextColumn{Header=column.Item1,Binding=new System.Windows.Data.Binding(column.Item2),Width=new DataGridLength(1,DataGridLengthUnitType.Star)});
         dashboardHost.Children.Add(liveGrid);
-    }
-    private void ShowSensorComponent()
-    {
-        if(dashboardHost==null)return;dashboard=null;liveGrid=null;dashboardHost.Children.Clear();var body=new StackPanel{Margin=new Thickness(24),VerticalAlignment=VerticalAlignment.Center};body.Children.Add(Txt("Аппаратные датчики",24));componentSummary=Txt(SensorComponents.Status,14,"#C1FA55");body.Children.Add(componentSummary);
-        body.Children.Add(Txt("Подписанный компонент уже в комплекте. Установка запускается только по вашей кнопке и подтверждается запросом Windows. Интернет не нужен.",13,"#9BB1C1",new Thickness(0,14,0,14)));
-        body.Children.Add(Txt("Набор температур и RPM зависит от оборудования, BIOS и прав доступа. Недоступные показания остаются пустыми. Защита Windows не отключается.",13,"#9BB1C1"));var button=Action("Подготовить датчики",PrepareSensors,true);button.HorizontalAlignment=HorizontalAlignment.Left;button.Margin=new Thickness(0,20,0,0);body.Children.Add(button);dashboardHost.Children.Add(body);
     }
     private void RefreshDashboard()
     {
         var now=DateTime.UtcNow;dashboard?.Update(timeline,settings.ChartSeconds,frozen==null?now:frozenTime,frozen);
         if(monitorSummary!=null){monitorSummary.Text=frozen==null?"● LIVE  ·  "+now.ToLocalTime().ToString("HH:mm:ss"):"Ⅱ ПАУЗА ПРОСМОТРА";monitorSummary.ToolTip=$"Обновление каждые 2 с · {sensors.Count(s=>s.Type=="Temperature")} температурных датчиков. История только локально. Защита активна независимо от паузы.";}
-        if(componentSummary!=null)componentSummary.Text=SensorComponents.Status;
         if(monitorAlert!=null){var warning=Dedsec.Tests.Diagnostics.Live(sensors,processes,settings.TemperatureLimit).FirstOrDefault(f=>f.Severity is "warning" or "critical");monitorAlert.Visibility=warning==null?Visibility.Collapsed:Visibility.Visible;if(warning!=null){monitorAlert.Text="⚠ "+warning.Title+" · "+warning.Evidence;monitorAlert.ToolTip=warning.Solution;}}
     }
     private void ExportTelemetry()
@@ -81,7 +61,7 @@ public partial class MainWindow
     }
     private async Task PrepareSensors()
     {
-        if(run!=null||preparingSensors){Activity.Text="Сначала дождитесь окончания теста";return;}
+        if(run!=null||toolRun!=null||auditing||storageBusy||preparingSensors){Activity.Text="Сначала дождитесь окончания теста";return;}
         if(!Environment.Is64BitOperatingSystem){BrandedDialog.Notify(this,"Базовый мониторинг доступен","Официальный низкоуровневый компонент поддерживает 64-битную ОС. На 32-битной Windows продолжают работать штатные счётчики CPU, RAM, дисков и сети, а также доступные датчики оборудования.");return;}
         bool install=SensorComponents.InstalledVersion is not Version v||v<new Version(2,2,0);
         if(!install&&SensorComponents.Elevated){BrandedDialog.Notify(this,"Компонент уже готов","Установлена версия "+SensorComponents.InstalledVersion+". Приложение запущено от администратора.\n\nЕсли отдельной температуры или RPM нет, устройство либо его драйвер не предоставили поддерживаемый датчик. Значение не будет выдумано.");return;}

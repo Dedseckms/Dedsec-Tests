@@ -33,7 +33,7 @@ public sealed class DashboardView:Grid
             Padding=new Thickness(14,12,14,10);CornerRadius=new CornerRadius(13);BorderThickness=new Thickness(1);BorderBrush=new SolidColorBrush(Color.FromRgb(43,59,70));Background=new LinearGradientBrush(Color.FromRgb(23,34,41),Color.FromRgb(15,23,30),65);
             var panel=new Grid();foreach(var height in new[]{GridLength.Auto,GridLength.Auto,new GridLength(1,GridUnitType.Star),GridLength.Auto})panel.RowDefinitions.Add(new(){Height=height});
             var heading=new DockPanel{Margin=new Thickness(0,0,0,7)};string asset=metric.Key is "cpu" or "gpu" or "ram"?metric.Key:"disk";
-            var image=new Image{Source=new BitmapImage(new Uri($"pack://application:,,,/Dedsec.Tests;component/Assets/{asset}.png")),Width=34,Height=34,Margin=new Thickness(0,0,10,0)};DockPanel.SetDock(image,Dock.Left);heading.Children.Add(image);
+            var image=new Image{Source=new BitmapImage(new Uri($"pack://application:,,,/Dedsec.Tests;component/Assets/{asset}.png")),Width=34,Height=34,Margin=new Thickness(0,0,10,0)};DockPanel.SetDock(image,Dock.Left);if(metric.Key is "network" or "power" or "fans"){var vector=Icons.Create(metric.Key,28,Lime);vector.Margin=new Thickness(0,0,10,0);DockPanel.SetDock(vector,Dock.Left);heading.Children.Add(vector);}else heading.Children.Add(image);
             var names=new StackPanel();names.Children.Add(Text(metric.Title,14,Brushes.WhiteSmoke));subtitle=Text(metric.Detail,10,Muted);names.Children.Add(subtitle);heading.Children.Add(names);panel.Children.Add(heading);
             paired=metric.SecondaryName.Length>0&&metric.Key!="ram";
             var readings=new Grid{Margin=new Thickness(0,0,0,4)};readings.ColumnDefinitions.Add(new());if(paired)readings.ColumnDefinitions.Add(new());

@@ -22,7 +22,7 @@ using Forms=System.Windows.Forms;
 namespace Dedsec.Tests;
 public partial class MainWindow : Window
 {
-    public bool CanUpdate => run==null;
+    public bool CanUpdate => run==null&&toolRun==null&&!auditing&&!storageBusy&&!preparingSensors;
     private readonly Settings settings=Settings.Load(); private readonly Telemetry telemetry=new(); private readonly DispatcherTimer timer=new(); private readonly Stopwatch runClock=new(); private string phase=""; private double peakTemperature;
     private readonly Forms.NotifyIcon tray=new(); private SystemInfo? info; private List<SensorRow> sensors=new(); private List<ProcessRow> processes=new(); private Report? report; private CancellationTokenSource? run;
     private string current="overview"; private bool polling,exiting,thermalRequired,publishing; private int gpuIndex; private DateTime? lastSensorRead; private ProgressBar? progress; private TextBlock? runText;
@@ -36,18 +36,18 @@ public partial class MainWindow : Window
         tray.Text="Dedsec Tests"; tray.Icon=System.Drawing.Icon.ExtractAssociatedIcon(Environment.ProcessPath!); tray.DoubleClick+=(_,_)=>Dispatcher.Invoke(Restore);
         StateChanged+=(_,_)=>{if(WindowState==WindowState.Minimized&&settings.Tray){Hide();tray.Visible=true;}};
         var menu=new Forms.ContextMenuStrip(); menu.Items.Add("Открыть",null,(_,_)=>Dispatcher.Invoke(Restore)); menu.Items.Add("Остановить тест",null,(_,_)=>Dispatcher.Invoke(()=>run?.Cancel())); menu.Items.Add("Выход",null,(_,_)=>Dispatcher.Invoke(()=>{exiting=true;Close();})); tray.ContextMenuStrip=menu;
-        timer.Interval=TimeSpan.FromSeconds(2); timer.Tick+=async(_,_)=>{if(run!=null&&lastSensorRead.HasValue&&(DateTime.UtcNow-lastSensorRead.Value).TotalSeconds>15){run.Cancel();Activity.Text="Тест остановлен: мониторинг не отвечает";}await Poll();}; Loaded+=async(_,_)=>await Initialize(); Closing+=(_,e)=>{ if(!exiting&&settings.Tray) {e.Cancel=true;Hide();tray.Visible=true;return;} run?.Cancel();timer.Stop();tray.Dispose(); if(!polling)telemetry.Dispose(); };
+        timer.Interval=TimeSpan.FromSeconds(2); timer.Tick+=async(_,_)=>{if(run!=null&&lastSensorRead.HasValue&&(DateTime.UtcNow-lastSensorRead.Value).TotalSeconds>15){run.Cancel();Activity.Text="Тест остановлен: мониторинг не отвечает";}await Poll();}; Loaded+=async(_,_)=>await Initialize(); Closing+=(_,e)=>{ if(storageWrite){e.Cancel=true;Activity.Text="Операция диска ещё выполняется. Дождитесь результата перед закрытием.";return;}if(!exiting&&settings.Tray) {e.Cancel=true;Hide();tray.Visible=true;return;} run?.Cancel();toolRun?.Cancel();timer.Stop();tray.Dispose(); if(!polling)telemetry.Dispose(); };
     }
     private void BuildNavigation()
     {
-        var names=new Dictionary<string,string>{{"overview","Обзор"},{"tests","Тестирование"},{"sensors","Мониторинг"},{"processes","Процессы"},{"diagnostics","Диагностика"},{"events","События Windows"},{"reports","Отчёты"},{"settings","Настройки"}};
+        var names=new Dictionary<string,string>{{"overview","Мониторинг"},{"tests","Тестирование"},{"processes","Процессы"},{"diagnostics","Диагностика"},{"storage","Диски"},{"reports","Отчёты"},{"settings","Настройки"}};
         var existing=Navigation.Children.OfType<Button>().ToArray();foreach(var b in existing)Navigation.Children.Remove(b);
         foreach(var item in names){var p=new StackPanel{Orientation=Orientation.Horizontal};p.Children.Add(Icons.Create(item.Key));p.Children.Add(new TextBlock{Text=item.Value,VerticalAlignment=VerticalAlignment.Center});var b=new Button{Tag=item.Key,Content=p,Padding=new Thickness(10,8,4,8),HorizontalContentAlignment=HorizontalAlignment.Left};b.Click+=Navigate;Navigation.Children.Add(b);}
     }
     private async Task Initialize()
     {
         bool capture=Environment.GetCommandLineArgs().Contains("--capture");
-        if(!capture && (!settings.Agreement || settings.AgreementVersion!="2026-11-24")) { if(!Agreement()) {exiting=true;Close();return;} settings.Agreement=true;settings.AgreementVersion="2026-11-24";settings.Save(); }
+        if(!capture && (!settings.Agreement || settings.AgreementVersion!="2026-11-24-disks")) { if(!Agreement()) {exiting=true;Close();return;} settings.Agreement=true;settings.AgreementVersion="2026-11-24-disks";settings.Save(); }
         Page.Children.Add(Txt("Определяем конфигурацию…",28)); info=await Task.Run(Inventory.Read); Activity.Text="Готово · данные хранятся локально"; ShowPage("overview");timer.Start();await Poll();
         // Update helper waits for a successfully loaded UI before deleting its rollback copy.
         var args=Environment.GetCommandLineArgs(); int index=Array.IndexOf(args,"--update-ready"); if(index>=0&&index+1<args.Length) {string marker=System.IO.Path.GetFullPath(args[index+1]); string local=System.IO.Path.GetFullPath(Settings.DataDir)+System.IO.Path.DirectorySeparatorChar;if(marker.StartsWith(local,StringComparison.OrdinalIgnoreCase))File.WriteAllText(marker,"ready");}
@@ -71,31 +71,31 @@ public partial class MainWindow : Window
             if(run!=null){peakTemperature=Math.Max(peakTemperature,max);if(!run.IsCancellationRequested)Activity.Text=$"{phase} · {runClock.Elapsed:mm\\:ss} · {(max>0?$"{max:F0} °C":"нет температурного датчика")}";}
             if(run!=null&&thermalRequired&&max==0){run.Cancel();Activity.Text="Тест остановлен: температурные датчики перестали отвечать";}
             if(run!=null&&max>=settings.TemperatureLimit){Activity.Text=$"Остановлено: {max:F0} °C ≥ лимита {settings.TemperatureLimit} °C";run.Cancel();}
-            timeline.Record(sensors,DateTime.UtcNow);RefreshDashboard();
-            if(liveGrid!=null&&current=="sensors")LiveTable.Refresh(liveGrid,sensorRows,sensors,s=>s.Id.Length>0?s.Id:s.Device+"/"+s.Name+"/"+s.Type);
+            timeline.Record(sensors,DateTime.UtcNow);RefreshDashboard();if(storageWrite)Activity.Text=$"Операция диска · {storageClock.Elapsed.Hours:00}:{storageClock.Elapsed.Minutes:00}:{storageClock.Elapsed.Seconds:00} · Windows выполняет изменение, дождитесь результата";
+            if(liveGrid!=null&&current=="overview")LiveTable.Refresh(liveGrid,sensorRows,sensors,s=>s.Id.Length>0?s.Id:s.Device+"/"+s.Name+"/"+s.Type);
             if(liveGrid!=null&&current=="processes")LiveTable.Refresh(liveGrid,processRows,processes,p=>p.Pid.ToString());
         }
         catch(Exception ex){Activity.Text="Мониторинг: "+ex.Message;}finally{polling=false;}
     }
     private void ShowPage(string name)
     {
-        current=name;Page.Children.Clear();FixedPage.Children.Clear();FixedPage.Visibility=Visibility.Collapsed;PageScroll.Visibility=Visibility.Visible;dashboard=null;monitorSummary=null;componentSummary=null;monitorAlert=null;liveGrid=null;PageScroll.ScrollToTop();
+        current=name;Page.Children.Clear();FixedPage.Children.Clear();FixedPage.Visibility=Visibility.Collapsed;PageScroll.Visibility=Visibility.Visible;dashboard=null;monitorSummary=null;monitorAlert=null;liveGrid=null;PageScroll.ScrollToTop();
         foreach(var child in Navigation.Children.OfType<Button>())child.Background=Brush(child.Tag as string==name?"#34452A":"#222B34");
-        switch(name){case "overview":Overview();break;case "tests":TestsPage();break;case "sensors":ShowSensors();break;case "processes":ShowProcesses();break;case "diagnostics":Diagnostics();break;case "events":EventsPage();break;case "reports":Reports();break;case "settings":SettingsPage();break;}
+        switch(name){case "overview":Overview();break;case "tests":TestsPage();break;case "processes":ShowProcesses();break;case "diagnostics":Diagnostics();break;case "storage":StoragePage();break;case "reports":Reports();break;case "settings":SettingsPage();break;}
         if(settings.Animations)Page.BeginAnimation(OpacityProperty,new DoubleAnimation(.35,1,TimeSpan.FromMilliseconds(180)));
     }
     private void Header(string eyebrow,string title,string subtitle){Page.Children.Add(Txt(eyebrow,10,"#C1FA55"));Page.Children.Add(Txt(title,27));Page.Children.Add(Txt(subtitle,13,"#96A2AF",new Thickness(0,4,0,14)));}
-    private void Overview()=>ShowDashboard(false);
+    private void Overview()=>ShowDashboard();
     private async Task Start(string mode)
     {
-        if(run!=null){Activity.Text="Уже выполняется тест. Сначала остановите его.";return;}if(info==null)return;
+        if(run!=null||toolRun!=null||auditing||storageBusy||preparingSensors){Activity.Text="Сначала дождитесь завершения текущей операции.";return;}if(info==null)return;
         bool temperature=sensors.Any(s=>s.Type=="Temperature");
         string coverage=$"CPU: {(sensors.Any(s=>s.Group=="Cpu"&&s.Type=="Temperature")?"температура доступна":"температура НЕ контролируется")}; GPU: {(sensors.Any(s=>s.Group.StartsWith("Gpu")&&s.Type=="Temperature")?"температура доступна":"температура НЕ контролируется")}.";
         if(!Confirm("Нагрузочный тест",$"Будет запущен режим: {mode}.\n\nCPU/GPU тесты повышают нагрузку и нагрев. RAM-тест выделяет до 256 MiB. Дисковый тест записывает временный файл 256 MiB на {settings.DiskRoot}; это создаёт износ и может занять время на HDD/USB.\n\nЛимит температур: {settings.TemperatureLimit} °C. {coverage} {(temperature?"Есть доступные температурные датчики; проверяется максимум всех доступных температур.":"Температурный контроль НЕДОСТУПЕН. Следите за состоянием оборудования самостоятельно.")}\n\nПрогон можно отменить. Автотест пропускает диск при предупреждении SMART. Это не полная проверка всего оборудования и не замена MemTest86 или сервисной диагностике.","Работа сохранена, я разрешаю выбранную нагрузку","Начать тест"))return;
         thermalRequired=temperature;peakTemperature=0;runClock.Restart();phase="Проверки системы";run=new CancellationTokenSource();GlobalStop.Visibility=Visibility.Visible;var token=run.Token;var r=new Report{System=info,Profile=mode=="stress"?"stress":"standard"};report=r;ShowPage("tests");Activity.Text="Тест выполняется · можно остановить";
         try
         {
-            r.Findings=await Task.Run(()=>Dedsec.Tests.Diagnostics.Analyze(info),token);
+            r.Findings=await Task.Run(()=>Dedsec.Tests.Diagnostics.Analyze(info),token);auditFindings=r.Findings.ToList();auditUtc=DateTime.UtcNow;
             if(mode=="stress")
             {
                 phase="Нагрузка CPU/GPU";
@@ -124,7 +124,6 @@ public partial class MainWindow : Window
         catch(Exception ex){r.Findings.Add(new("warning","Ошибка прогона",ex.Message,"Проверьте оборудование и повторите тест."));Activity.Text="Прогон завершился с ошибкой";}
         finally{runClock.Stop();GlobalStop.Visibility=Visibility.Collapsed;r.Findings.Add(new(peakTemperature>=settings.TemperatureLimit?"warning":peakTemperature>0?"info":"unknown","Пиковая наблюдавшаяся температура",peakTemperature>0?$"Максимум доступных датчиков за прогон: {peakTemperature:F0} °C. Длительность процесса: {runClock.Elapsed.TotalSeconds:F0} с.":"Во время прогона температуры не были получены.","Это максимум полученных показаний, не гарантия отсутствия кратковременных пиков. Рабочие пределы нужно сверять с моделью компонента."));run.Dispose();run=null;SaveReport(r);ShowPage("reports");}
     }
-    private void ShowSensors()=>ShowDashboard(true);
     private void ShowProcesses()
     {
         processRows.Clear();foreach(var row in processes)processRows.Add(row);var root=PageWorkspace("Процессы",$"До 300 процессов · CPU нормирован на {Environment.ProcessorCount} потоков · имена и PID остаются локально");var body=new Grid();body.RowDefinitions.Add(new(){Height=GridLength.Auto});body.RowDefinitions.Add(new());AddRow(root,body,1);
@@ -133,19 +132,10 @@ public partial class MainWindow : Window
     }
     private async Task Scan()
     {
-        if(info==null)return;if(run!=null){Activity.Text="Дождитесь завершения нагрузки";return;}Activity.Text="Проверяем систему и журналы событий…";var findings=await Task.Run(()=>Dedsec.Tests.Diagnostics.Analyze(info));var snapshot=Dedsec.Tests.Diagnostics.Live(sensors,processes,settings.TemperatureLimit);report=new(){System=info,Findings=findings.Concat(snapshot).ToList()};SaveReport(report);ShowPage("diagnostics");Activity.Text=$"Диагностика завершена · предупреждений: {report.Findings.Count(f=>f.Severity is "warning" or "critical")}";
-    }
-    private void EventsPage()
-    {
-        Header("ПРИЧИНЫ ВМЕСТО НЕПОНЯТНЫХ КОДОВ","События Windows", "System и Application за 7 дней. Сообщения читаются и сохраняются только локально.");Page.Children.Add(Action("Прочитать журналы",async()=>{Activity.Text="Читаем журналы…";var events=await Task.Run(Dedsec.Tests.Diagnostics.ReadEvents);report??=new(){System=info};report.Findings.RemoveAll(f=>f.Title.Contains("Event ")||f.Title.StartsWith("Журнал "));report.Findings.AddRange(events);SaveReport(report);ShowPage("events");Activity.Text="Журналы обработаны";},true));Page.Children.Add(Action("Открыть Просмотр событий",()=>Open("eventvwr.msc")));foreach(var f in report?.Findings.Where(f=>f.Title.Contains("Event ")||f.Title.StartsWith("Журнал "))??Enumerable.Empty<Finding>())Page.Children.Add(FindingCard(f));
-    }
-    private void Diagnostics()
-    {
-        Header("ПРОВЕРКИ И РЕКОМЕНДАЦИИ","Разберёмся с проблемами", "Проверки читают состояние. Рекомендации показывают причину и не применяются автоматически.");
-        Page.Children.Add(Action("Найти проблемы без нагрузки",async()=>await Scan(),true));
-        var decode=new StackPanel();decode.Children.Add(Txt("Объяснить код ошибки",20));var code=new TextBox{Text="0x80070005",Margin=new Thickness(0,8,0,8)};var stop=new CheckBox{Content="Это STOP-код синего экрана (BSOD)"};var answer=Txt("Укажи источник: Win32/HRESULT и BSOD используют разные пространства кодов.",13,"#96A2AF");decode.Children.Add(code);decode.Children.Add(stop);decode.Children.Add(Action("Расшифровать локально",()=>answer.Text=ErrorCodes.Explain(code.Text,stop.IsChecked==true)));decode.Children.Add(answer);Page.Children.Add(WrapCard(decode));
-        var findings=(report?.Findings??new()).Where(f=>!f.Title.Contains("Event ")).ToList();Page.Children.Add(Card("ИТОГ ДИАГНОСТИКИ",$"{findings.Count(f=>f.Severity=="critical")} критических · {findings.Count(f=>f.Severity=="warning")} предупреждений",$"{findings.Count(f=>f.Severity=="unknown")} проверок не получили данных. События находятся в отдельном разделе. Это наблюдения, не гарантия исправности."));foreach(var f in findings.OrderBy(f=>f.Severity=="critical"?0:f.Severity=="warning"?1:f.Severity=="unknown"?2:3))Page.Children.Add(FindingCard(f));
-        Page.Children.Add(Txt("Системные инструменты",23));var tools=new WrapPanel();tools.Children.Add(Action("Обновления Windows",()=>Open("ms-settings:windowsupdate")));tools.Children.Add(Action("Автозагрузка",()=>Open("ms-settings:startupapps")));tools.Children.Add(Action("Питание",()=>Open("ms-settings:powersleep")));tools.Children.Add(Action("Проверить системные файлы",()=>AdminCheck("sfc.exe","/verifyonly")));tools.Children.Add(Action("Проверить образ Windows",()=>AdminCheck("DISM.exe","/Online /Cleanup-Image /ScanHealth")));Page.Children.Add(tools);Page.Children.Add(Txt("SFC и DISM откроют отдельную консоль с запросом UAC. Эти команды выполняют диагностику и не запускают автоматическое восстановление. Результаты остаются в консоли и системных журналах.",12,"#96A2AF"));
+        if(info==null||run!=null||toolRun!=null||auditing||storageBusy||preparingSensors)return;auditing=true;Activity.Text="Проверяем систему, накопители и журналы…";ShowPage("diagnostics");
+        try{var findings=await Task.Run(()=>Dedsec.Tests.Diagnostics.Analyze(info));findings.AddRange(SessionAnalysis.Read(timeline,DateTime.UtcNow,settings.TemperatureLimit));findings.AddRange(Dedsec.Tests.Diagnostics.Live(sensors,processes,settings.TemperatureLimit));auditFindings=findings;auditUtc=DateTime.UtcNow;SaveReport(new Report{System=info,Findings=findings});Activity.Text=$"Диагностика завершена · {findings.Count} наблюдений и проверок";}
+        catch(Exception ex){Activity.Text="Диагностика не завершена: "+ex.Message;}
+        finally{auditing=false;if(current=="diagnostics")ShowPage("diagnostics");}
     }
     private async Task Publish(Report r)
     {
@@ -185,7 +175,7 @@ public partial class MainWindow : Window
     private void Minimize(object sender,RoutedEventArgs e)=>WindowState=WindowState.Minimized;
     private void Maximize(object sender,RoutedEventArgs e)=>WindowState=WindowState==WindowState.Maximized?WindowState.Normal:WindowState.Maximized;
     private void CloseWindow(object sender,RoutedEventArgs e)=>Close();
-    private void StopAll(object sender,RoutedEventArgs e)=>run?.Cancel();
+    private void StopAll(object sender,RoutedEventArgs e){run?.Cancel();toolRun?.Cancel();}
     private void OpenWebsite(object sender,RoutedEventArgs e)=>Open("https://tests.dedseckms.ru");
 }
 public sealed class UniformGridColumns : System.Windows.Controls.Primitives.UniformGrid{public UniformGridColumns(int columns){Columns=columns;}}

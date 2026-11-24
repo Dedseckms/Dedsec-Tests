@@ -1,0 +1,66 @@
+param([switch]$AllowVirtualDiskFixture)
+$ErrorActionPreference='Stop'
+if(!$AllowVirtualDiskFixture){throw 'This test creates and changes only its own temporary VHD. Pass -AllowVirtualDiskFixture.'}
+if(!([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)){throw 'Administrator token required for the temporary VHD.'}
+$repo=Split-Path $PSScriptRoot -Parent;$area=[IO.Path]::GetFullPath((Join-Path $repo ('artifacts\storage-vhd-'+[guid]::NewGuid().ToString('N'))));$artifactRoot=[IO.Path]::GetFullPath((Join-Path $repo 'artifacts'))+[IO.Path]::DirectorySeparatorChar
+if(!$area.StartsWith($artifactRoot,[StringComparison]::OrdinalIgnoreCase)){throw 'Fixture workspace escapes artifacts.'};New-Item -ItemType Directory -Path $area|Out-Null
+$fixturePath=Join-Path $area 'dedsec-disposable.vhd';$worker=Join-Path $area 'StorageWorker.ps1';[IO.File]::WriteAllText($worker,[IO.File]::ReadAllText((Join-Path $repo 'src\Dedsec.Tests\StorageWorker.ps1')),[Text.UTF8Encoding]::new($true))
+$fixtureDiskNumber=$null;$passed=0;$mountedLetter=$null
+function Check([bool]$condition,[string]$name){if(!$condition){throw $name};$script:passed++;Write-Output "PASS $name"}
+function Assert-Fixture {
+ if(!([IO.Path]::GetFullPath($fixturePath)).StartsWith($area+[IO.Path]::DirectorySeparatorChar,[StringComparison]::OrdinalIgnoreCase)){throw 'Fixture image path escaped workspace.'}
+ $image=Get-DiskImage -ImagePath $fixturePath -ErrorAction Stop;if(!$image.Attached){throw 'Fixture VHD is not attached.'};$mapped=@($image|Get-Disk -ErrorAction Stop)
+ if($mapped.Count -ne 1 -or $mapped[0].IsBoot -or $mapped[0].IsSystem -or $mapped[0].Size -gt 600MB -or ($null -ne $script:fixtureDiskNumber -and $mapped[0].Number -ne $script:fixtureDiskNumber)){throw 'Refusing any target other than this test VHD.'};$mapped[0]
+}
+function Invoke-Worker([hashtable]$request,[switch]$ExpectFailure){
+ if($request.action -ne 'inventory'){$target=Assert-Fixture;if([int]$request.disk -ne [int]$target.Number){throw 'Request would target another disk.'}}
+ $op=Join-Path $area ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory -Path $op|Out-Null;$request.operation_id=[guid]::NewGuid().ToString('N');$request.application_path=$repo;$request.data_path=$area;$request.user_profile=$env:USERPROFILE;if($request.test_protect_path){$request.application_path=$request.test_protect_path}
+ $requestFile=Join-Path $op 'request.json';$responseFile=Join-Path $op 'response.json';[IO.File]::WriteAllText($requestFile,($request|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($true))
+ & "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy RemoteSigned -File $worker -RequestPath $requestFile -OutputPath $responseFile
+ if(!(Test-Path -LiteralPath $responseFile)){throw 'No worker response.'};$response=Get-Content -LiteralPath $responseFile -Raw -Encoding UTF8|ConvertFrom-Json
+ if($ExpectFailure){if($response.success){throw 'An invalid storage plan was accepted.'};return $response}
+ if(!$response.success){throw $response.error};$response.data
+}
+function Current-Disk {Assert-Fixture|Out-Null;$snapshot=Invoke-Worker @{action='inventory'};$matches=@($snapshot.disks|Where-Object number -eq $script:fixtureDiskNumber);if($matches.Count -ne 1){throw 'Fixture missing from snapshot.'};$matches[0]}
+function Request([string]$action,$disk,$part=$null){$request=@{action=$action;disk=$disk.number;disk_key=$disk.key;layout_key=$disk.layout_key};if($part){$request.partition=$part.number;$request.expected_offset=$part.offset;$request.expected_size=$part.size};$request}
+try{
+ $create=Join-Path $area 'create-vhd.txt';[IO.File]::WriteAllLines($create,@("create vdisk file=`"$fixturePath`" maximum=512 type=expandable","select vdisk file=`"$fixturePath`"",'attach vdisk','exit'),[Text.Encoding]::ASCII)
+ & "$env:SystemRoot\System32\diskpart.exe" /s $create|Set-Content -LiteralPath (Join-Path $area 'diskpart-create.log')
+ $mapped=Assert-Fixture;$fixtureDiskNumber=[int]$mapped.Number;$disk=Current-Disk;Check ($disk.style -eq 'RAW') 'Only newly created RAW test VHD selected'
+ $request=Request 'initialize' $disk;$request.style='GPT';Invoke-Worker $request|Out-Null;$disk=Current-Disk;Check ($disk.style -eq 'GPT') 'Initialize GPT on the disposable VHD'
+ $request=Request 'create' $disk;$request.offset=32MB;$request.bytes=160MB;Invoke-Worker $request|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];Check ($part.size -eq 160MB) 'Create partition at an explicit non-overlapping range'
+ $request=Request 'format' $disk $part;$request.filesystem='NTFS';$request.label='DEDSEC_QA';$request.full=$false;Invoke-Worker $request|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];Check ($part.filesystem -eq 'NTFS') 'Format only the test partition as NTFS'
+ $request=Request 'format' $disk $part;$request.disk_key='invalid-key';$request.filesystem='NTFS';Invoke-Worker $request -ExpectFailure|Out-Null;Check $true 'Changed disk identity refuses a destructive request'
+ $old=Request 'resize' $disk $part;$old.bytes=224MB
+ $request=Request 'create' $disk;$request.offset=288MB;$request.bytes=64MB;Invoke-Worker $request|Out-Null;Invoke-Worker $old -ExpectFailure|Out-Null;Check $true 'Stale partition layout refuses resize'
+ $disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];$staleGuid=Request 'resize' $disk $part;$staleGuid.bytes=224MB;$donor=@($disk.partitions|Where-Object offset -eq 288MB)[0];Invoke-Worker (Request 'delete' $disk $donor)|Out-Null;$disk=Current-Disk;$recreate=Request 'create' $disk;$recreate.offset=288MB;$recreate.bytes=64MB;Invoke-Worker $recreate|Out-Null;Invoke-Worker $staleGuid -ExpectFailure|Out-Null;Check $true 'Recreating a partition at the same offsets invalidates the old GPT layout identity'
+ $disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];$bounds=Invoke-Worker (Request 'bounds' $disk $part);Check ($bounds.max -le 256MB -and $bounds.max -ge 224MB) 'Supported growth stops before a neighbouring partition'
+ $request=Request 'resize' $disk $part;$request.bytes=400MB;Invoke-Worker $request -ExpectFailure|Out-Null;Check $true 'Non-contiguous requested capacity is rejected'
+ $request=Request 'resize' $disk $part;$request.bytes=224MB;Invoke-Worker $request|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];Check ($part.size -eq 224MB) 'Extend NTFS into contiguous free space'
+ $request=Request 'resize' $disk $part;$request.bytes=192MB;Invoke-Worker $request|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];Check ($part.size -eq 192MB) 'Shrink NTFS inside Windows-supported minimum'
+ # Fixture-only EFI setup is deliberately separate from production deletion/format protections.
+ Assert-Fixture|Out-Null;$efi=New-Partition -DiskNumber $fixtureDiskNumber -Offset 416MB -Size 64MB -GptType '{c12a7328-f81f-11d2-ba4b-00a0c93ec93b}' -ErrorAction Stop;Format-Volume -Partition $efi -FileSystem FAT32 -NewFileSystemLabel 'DEDSEC_EFI' -Confirm:$false -Force -ErrorAction Stop|Out-Null
+ $used=@(Get-Volume|ForEach-Object {[string]$_.DriveLetter});$mountedLetter=@('Z','Y','X','W'|Where-Object {$_ -notin $used})[0];if(!$mountedLetter){throw 'No free letter for fixture EFI.'};Add-PartitionAccessPath -DiskNumber $fixtureDiskNumber -PartitionNumber $efi.PartitionNumber -AccessPath ($mountedLetter+':\')
+ $mounted=Get-Partition -DriveLetter ([char]$mountedLetter);if($mounted.DiskNumber -ne $fixtureDiskNumber){throw 'EFI mount does not refer to fixture VHD.'};$efiRoot=$mountedLetter+':\EFI';New-Item -ItemType Directory -Path (Join-Path $efiRoot 'Microsoft'),(Join-Path $efiRoot 'QA-Disposable')|Out-Null
+ [IO.File]::WriteAllText((Join-Path $efiRoot 'Microsoft\keep.test'),'test-fixture-protected');[IO.File]::WriteAllText((Join-Path $efiRoot 'QA-Disposable\boot.test'),'test-fixture-backup')
+ $disk=Current-Disk;$efiPart=@($disk.partitions|Where-Object number -eq $efi.PartitionNumber)[0]
+ $request=Request 'format' $disk $efiPart;$request.filesystem='FAT32';Invoke-Worker $request -ExpectFailure|Out-Null;Check $true 'Production formatter refuses EFI even on a disposable disk'
+ $request=Request 'delete' $disk $efiPart;Invoke-Worker $request -ExpectFailure|Out-Null;Check $true 'Production partition deletion refuses EFI'
+ $folders=Invoke-Worker (Request 'efi_inventory' $disk $efiPart);$candidate=@($folders.folders|Where-Object name -eq 'QA-Disposable')[0];Check ($candidate.files -eq 1) 'EFI inspection reads only actual test files'
+ $request=Request 'efi_cleanup' $disk $efiPart;$request.folder='Microsoft';$request.folder_key=@($folders.folders|Where-Object name -eq 'Microsoft')[0].key;Invoke-Worker $request -ExpectFailure|Out-Null;Check (Test-Path -LiteralPath (Join-Path $efiRoot 'Microsoft\keep.test')) 'EFI Microsoft directory cannot be cleaned'
+ $request=Request 'efi_cleanup' $disk $efiPart;$request.folder='..';$request.folder_key=$candidate.key;Invoke-Worker $request -ExpectFailure|Out-Null;Check $true 'EFI cleanup rejects path traversal'
+ $request=Request 'efi_cleanup' $disk $efiPart;$request.folder='QA-Disposable';$request.folder_key='stale';Invoke-Worker $request -ExpectFailure|Out-Null;Check (Test-Path -LiteralPath (Join-Path $efiRoot 'QA-Disposable\boot.test')) 'Changed EFI preview refuses deletion'
+ $request.folder_key=$candidate.key;$cleaned=Invoke-Worker $request;Check ((Test-Path -LiteralPath $cleaned.backup) -and !(Test-Path -LiteralPath (Join-Path $efiRoot 'QA-Disposable')) -and (Test-Path -LiteralPath (Join-Path $efiRoot 'Microsoft\keep.test'))) 'EFI cleanup verifies backup and preserves protected sibling'
+ $disk=Current-Disk;$exfat=@($disk.partitions|Where-Object offset -eq 288MB)[0];$request=Request 'format' $disk $exfat;$request.filesystem='exFAT';$request.label='';$request.full=$true;Invoke-Worker $request|Out-Null;$disk=Current-Disk;Check (@($disk.partitions|Where-Object offset -eq 288MB)[0].filesystem -eq 'exFAT') 'Full exFAT format succeeds with an empty optional label'
+ $disk=Current-Disk;$donor=@($disk.partitions|Where-Object offset -eq 288MB)[0];Invoke-Worker (Request 'delete' $disk $donor)|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];$request=Request 'resize' $disk $part;$request.bytes=320MB;Invoke-Worker $request|Out-Null;$disk=Current-Disk;Check (@($disk.partitions|Where-Object offset -eq 32MB)[0].size -eq 320MB) 'Extend volume using contiguous space freed by deleting another test partition'
+ $disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];$used=@(Get-Volume|ForEach-Object {[string]$_.DriveLetter});$newLetter=@('V','U','T','S'|Where-Object {$_ -notin $used})[0];if(!$newLetter){throw 'No free fixture data letter.'};$request=Request 'letter' $disk $part;$request.letter=$newLetter;Invoke-Worker $request|Out-Null;$disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];Check ($part.letter -eq $newLetter) 'Change drive letter only on the disposable data volume'
+ $request=Request 'format' $disk $part;$request.filesystem='NTFS';$request.test_protect_path=$newLetter+':\SimulatedApplication';$refused=Invoke-Worker $request -ExpectFailure;Check ($refused.error -match 'Partition contains') 'A partition containing the application path cannot be formatted'
+ $fixtureMount=Join-Path $area 'mounted-test-volume';New-Item -ItemType Directory -Path $fixtureMount|Out-Null;Assert-Fixture|Out-Null;Add-PartitionAccessPath -DiskNumber $fixtureDiskNumber -PartitionNumber $part.number -AccessPath ($fixtureMount+'\');Remove-PartitionAccessPath -DiskNumber $fixtureDiskNumber -PartitionNumber $part.number -AccessPath ($newLetter+':\')
+ $disk=Current-Disk;$part=@($disk.partitions|Where-Object offset -eq 32MB)[0];$request=Request 'format' $disk $part;$request.filesystem='NTFS';$request.test_protect_path=Join-Path $fixtureMount 'SimulatedApplication';$refused=Invoke-Worker $request -ExpectFailure;Check ($refused.error -match 'Partition contains') 'Application protection follows folder mount points without a drive letter'
+ Assert-Fixture|Out-Null;$efiNative=Get-Partition -DiskNumber $fixtureDiskNumber -PartitionNumber $efi.PartitionNumber;Format-Volume -Partition $efiNative -FileSystem NTFS -Confirm:$false -Force -ErrorAction Stop|Out-Null
+ $disk=Current-Disk;$efiPart=@($disk.partitions|Where-Object number -eq $efi.PartitionNumber)[0];$refused=Invoke-Worker (Request 'efi_inventory' $disk $efiPart) -ExpectFailure;Check ($refused.error -match 'only FAT/FAT32') 'EFI cleanup refuses an NTFS partition even when its GPT type claims EFI'
+ $record=@{passed=$passed;virtual_image=$fixturePath;disk_number=$fixtureDiskNumber;physical_disks_modified=$false;firmware_modified=$false};$record|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $area 'validation.json') -Encoding UTF8
+ Write-Output "$passed native VHD checks passed; evidence: $area"
+}finally{
+ if(Test-Path -LiteralPath $fixturePath){try{Dismount-DiskImage -ImagePath $fixturePath -ErrorAction Stop|Out-Null}catch{Write-Warning 'Test VHD detach failed; image retained for manual cleanup.'}}
+}

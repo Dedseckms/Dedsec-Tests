@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="../UpdateTrust.cs" Link="UpdateTrust.cs" />
     <EmbeddedResource Include="../UpdatePublicKey.pem" LogicalName="UpdatePublicKey.pem" />
+    <EmbeddedResource Include="StorageWorker.ps1" LogicalName="StorageWorker.ps1" />
     <PackageReference Include="System.Management" Version="10.0.2" />
     <PackageReference Include="LibreHardwareMonitorLib" Version="0.9.6" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

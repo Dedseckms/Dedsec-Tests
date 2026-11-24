@@ -8,7 +8,7 @@ using System.Management;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 namespace Dedsec.Tests;
-public static class Diagnostics
+public static partial class Diagnostics
 {
     private const string WindowsHelp="https://support.microsoft.com/windows";
     private sealed record Probe(bool Available,List<Dictionary<string,object>> Rows,string Error);
@@ -47,7 +47,7 @@ public static class Diagnostics
         {
             using var key=Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\"+profile);if(key?.GetValue("EnableFirewall") is int enabled&&enabled==0)Add("warning","Профиль брандмауэра отключён",profile+": EnableFirewall=0 в локальной конфигурации. Политики организации могут переопределять значение.","Проверьте активный профиль в «Безопасность Windows». Для нужных приложений создавайте узкие исключения; не отключайте защиту целиком.","windowsdefender:");
         }
-        list.AddRange(ReadEvents());return list;
+        list.AddRange(Extended());list.AddRange(ReadEvents());return list;
     }
     public static List<Finding> Live(List<SensorRow> sensors,List<ProcessRow> processes,int limit)
     {
