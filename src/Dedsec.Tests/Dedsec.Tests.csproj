@@ -17,5 +17,8 @@
     <Content Include="../../LICENSE" Link="LICENSE" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../LICENSE-RU.txt" Link="LICENSE-RU.txt" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../THIRD-PARTY-NOTICES.md" Link="THIRD-PARTY-NOTICES.md" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../.tools/components/PawnIO_setup.exe" Link="tools/PawnIO_setup.exe" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../.tools/components/PawnIO_setup.exe')" />
+    <Content Include="../../.tools/components/PawnIO-2.2.0-source.zip" Link="tools/PawnIO-2.2.0-source.zip" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../.tools/components/PawnIO-2.2.0-source.zip')" />
+    <Content Include="../../.tools/components/PawnIO-SOURCE.txt" Link="tools/PawnIO-SOURCE.txt" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../.tools/components/PawnIO-SOURCE.txt')" />
   </ItemGroup>
 </Project>

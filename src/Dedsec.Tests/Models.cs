@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 namespace Dedsec.Tests;
@@ -38,7 +39,9 @@ public sealed class Settings
     public bool IncludeGpu { get; set; } = true;
     public bool IncludeDisk { get; set; } = true;
     public bool IncludeMemory { get; set; } = true;
-    public static string DataDir => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DedsecTests");
+    public int ChartSeconds { get; set; } = 60;
+    public int StressSeconds { get; set; } = 60;
+    public static string DataDir => Environment.GetCommandLineArgs().Contains("--capture") ? Path.Combine(AppContext.BaseDirectory,"capture-local") : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DedsecTests");
     public static Settings Load() { try { return JsonSerializer.Deserialize<Settings>(File.ReadAllText(Path.Combine(DataDir, "settings.json")), Json.Options) ?? new(); } catch { return new(); } }
     public void Save() { Directory.CreateDirectory(DataDir); File.WriteAllText(Path.Combine(DataDir, "settings.json"), JsonSerializer.Serialize(this, Json.Options)); }
 }

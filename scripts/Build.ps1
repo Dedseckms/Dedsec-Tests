@@ -1,5 +1,6 @@
 param([string]$Dotnet='dotnet',[string]$Iscc='ISCC.exe',[switch]$SkipInstaller)
 $ErrorActionPreference='Stop';$root=Split-Path $PSScriptRoot -Parent;Set-Location $root
+& "$PSScriptRoot\Fetch-Components.ps1"
 $version=([xml](Get-Content .\Directory.Build.props -Raw)).Project.PropertyGroup.Version
 $buildRoot=Join-Path $root ('artifacts\build-'+(Get-Date -Format 'yyyyMMdd-HHmmss')+'-'+[Guid]::NewGuid().ToString('N').Substring(0,6))
 $release=Join-Path $buildRoot 'release';New-Item -ItemType Directory -Force $release | Out-Null

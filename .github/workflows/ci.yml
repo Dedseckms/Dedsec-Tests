@@ -30,6 +30,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - run: ./scripts/Fetch-Components.ps1
       - run: dotnet run --project tests/Dedsec.Tests.Checks -c Release
       - run: python scripts/Test-ClientPublication.py
       - run: dotnet run --no-build --project tests/Dedsec.Tests.Checks -c Release -- --ui
