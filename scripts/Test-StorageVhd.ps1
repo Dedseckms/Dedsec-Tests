@@ -62,5 +62,8 @@ try{
  $record=@{passed=$passed;virtual_image=$fixturePath;disk_number=$fixtureDiskNumber;physical_disks_modified=$false;firmware_modified=$false};$record|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $area 'validation.json') -Encoding UTF8
  Write-Output "$passed native VHD checks passed; evidence: $area"
 }finally{
- if(Test-Path -LiteralPath $fixturePath){try{Dismount-DiskImage -ImagePath $fixturePath -ErrorAction Stop|Out-Null}catch{Write-Warning 'Test VHD detach failed; image retained for manual cleanup.'}}
+ if(Test-Path -LiteralPath $fixturePath){try{Dismount-DiskImage -ImagePath $fixturePath -ErrorAction Stop|Out-Null;if((Get-DiskImage -ImagePath $fixturePath -ErrorAction Stop).Attached){throw 'Fixture still attached.'}}catch{throw ('Test VHD detach failed; image retained for manual cleanup. '+$_.Exception.Message)}}
 }
+# Expected-failure worker probes intentionally return 1. Do not leak that native
+# exit status into the CI shell after all assertions and cleanup succeeded.
+$global:LASTEXITCODE=0
