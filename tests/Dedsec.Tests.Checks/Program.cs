@@ -2,6 +2,21 @@ using Dedsec.Tests;
 using Dedsec.Update;
 using System.Text.Json;
 using System.Reflection;
+if(args.Contains("--agreement-ready"))
+{
+    if(!args.Contains("--capture"))throw new InvalidOperationException("Agreement probe requires isolated capture settings.");
+    int markerIndex=Array.IndexOf(args,"--update-ready");string marker=Path.GetFullPath(args[markerIndex+1]);if(!marker.StartsWith(Path.GetFullPath(Settings.DataDir)+Path.DirectorySeparatorChar,StringComparison.OrdinalIgnoreCase)||File.Exists(marker))throw new InvalidOperationException("Fresh isolated marker required.");Directory.CreateDirectory(Settings.DataDir);
+    Exception? failure=null;var ui=new Thread(()=>
+    {
+        try
+        {
+            var app=new Dedsec.Tests.App();app.InitializeComponent();var owner=new MainWindow{WindowStartupLocation=System.Windows.WindowStartupLocation.Manual,Left=-16000,Top=-16000,ShowInTaskbar=false};
+            System.Windows.EventManager.RegisterClassHandler(typeof(BrandedDialog),System.Windows.FrameworkElement.LoadedEvent,new System.Windows.RoutedEventHandler((sender,_)=>{var dialog=(BrandedDialog)sender;dialog.WindowStartupLocation=System.Windows.WindowStartupLocation.Manual;dialog.Left=-16000;dialog.Top=-16000;}));
+            bool waitingWithConsent=false;var clock=System.Diagnostics.Stopwatch.StartNew();var timer=new System.Windows.Threading.DispatcherTimer{Interval=TimeSpan.FromMilliseconds(100)};timer.Tick+=(_,_)=>{var dialog=app.Windows.OfType<BrandedDialog>().FirstOrDefault();if(dialog==null)return;if(File.Exists(marker)){waitingWithConsent=dialog.Consent!=null&&dialog.Consent.IsChecked!=true&&!dialog.AcceptButton.IsEnabled;timer.Stop();dialog.DialogResult=false;}else if(clock.Elapsed.TotalSeconds>10){timer.Stop();dialog.DialogResult=false;}};timer.Start();
+            owner.Show();bool accepted=(bool)typeof(MainWindow).GetMethod("Agreement",BindingFlags.Instance|BindingFlags.NonPublic)!.Invoke(owner,null)!;timer.Stop();if(!File.Exists(marker)||!waitingWithConsent||accepted)throw new Exception("Rendered agreement did not signal readiness while consent was pending.");owner.Close();app.Shutdown();
+        }catch(Exception error){failure=error;}
+    });ui.IsBackground=true;ui.SetApartmentState(ApartmentState.STA);ui.Start();if(!ui.Join(TimeSpan.FromSeconds(20)))throw new TimeoutException("Agreement probe timed out");if(failure!=null)throw failure;Console.WriteLine("PASS Actual agreement signals updater readiness while consent remains unchecked; no consent accepted");return;
+}
 if(args.Length==2&&args[0]=="--job-owner")
 {
     var child=System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Path.Combine(Environment.SystemDirectory,"ping.exe"),"-n 60 127.0.0.1"){UseShellExecute=false,CreateNoWindow=true,RedirectStandardOutput=true})!;

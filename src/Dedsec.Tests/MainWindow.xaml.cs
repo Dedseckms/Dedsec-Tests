@@ -50,7 +50,7 @@ public partial class MainWindow : Window
         if(!capture && (!settings.Agreement || settings.AgreementVersion!="2026-11-24-disks")) { if(!Agreement()) {exiting=true;Close();return;} settings.Agreement=true;settings.AgreementVersion="2026-11-24-disks";settings.Save(); }
         Page.Children.Add(Txt("Определяем конфигурацию…",28)); info=await Task.Run(Inventory.Read); Activity.Text="Готово · данные хранятся локально"; ShowPage("overview");timer.Start();await Poll();
         // Update helper waits for a successfully loaded UI before deleting its rollback copy.
-        var args=Environment.GetCommandLineArgs(); int index=Array.IndexOf(args,"--update-ready"); if(index>=0&&index+1<args.Length) {string marker=System.IO.Path.GetFullPath(args[index+1]); string local=System.IO.Path.GetFullPath(Settings.DataDir)+System.IO.Path.DirectorySeparatorChar;if(marker.StartsWith(local,StringComparison.OrdinalIgnoreCase))File.WriteAllText(marker,"ready");}
+        ReportUpdateReady();
         if(capture)await CapturePreview();
     }
     private bool Agreement()
@@ -58,7 +58,15 @@ public partial class MainWindow : Window
         string file=System.IO.Path.Combine(AppContext.BaseDirectory,"LICENSE-RU.txt");
         string text=File.Exists(file)?File.ReadAllText(file):"Условия недоступны. Установите полную сборку из GitHub Releases.";
         if(!File.Exists(file)){BrandedDialog.Notify(this,"Соглашение недоступно",text);return false;}
-        return Confirm("Лицензия и локальная диагностика",text,"Я прочитал условия и разрешаю чтение конфигурации, датчиков, процессов и журналов Windows локально","Принять и продолжить");
+        var dialog=BrandedDialog.CreateConsent(this,"Лицензия и локальная диагностика",text,"Я прочитал условия и разрешаю чтение конфигурации, датчиков, процессов и журналов Windows локально","Принять и продолжить");
+        // A rendered agreement is a ready UI. Waiting for human consent must not trigger updater rollback.
+        dialog.ContentRendered+=(_,_)=>ReportUpdateReady();return dialog.ShowDialog()==true;
+    }
+    private void ReportUpdateReady()
+    {
+        var args=Environment.GetCommandLineArgs();int index=Array.IndexOf(args,"--update-ready");if(index<0||index+1>=args.Length)return;
+        string marker=System.IO.Path.GetFullPath(args[index+1]),local=System.IO.Path.GetFullPath(Settings.DataDir)+System.IO.Path.DirectorySeparatorChar;
+        if(marker.StartsWith(local,StringComparison.OrdinalIgnoreCase))File.WriteAllText(marker,"ready");
     }
     private bool Confirm(string title,string body,string checkText,string action)=>BrandedDialog.Confirm(this,title,body,checkText,action);
     private async Task Poll()
