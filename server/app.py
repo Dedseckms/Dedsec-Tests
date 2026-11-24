@@ -20,10 +20,29 @@ DB = Path(os.environ.get('DEDSEC_DB', '/var/lib/dedsec-tests/results.sqlite3'))
 SITE = 'https://tests.dedseckms.ru'
 CONSENT = '2026-11-23'
 METRICS = {'cpu_single': 'MiB/s', 'cpu_multi': 'MiB/s', 'gpu_compute': 'Miter/s', 'ram_copy': 'MiB/s', 'ram_errors': 'errors', 'disk_read': 'MiB/s', 'disk_write': 'MiB/s', 'disk_latency': 'ms'}
+OVERALL_VERSION = 'dt-overall-v1'
+OVERALL_WEIGHTS = {'cpu': .40, 'gpu': .30, 'ram': .15, 'disk': .15}
 LOCK = threading.Lock()
 NONCES = {}
 RATES = {}
 SALT = secrets.token_bytes(32)
+
+def overall_rating(payload):
+    """A fixed, monotonic workload index, never a population percentile or FPS."""
+    measurements={m['metric']:m for m in payload['measurements']}
+    missing=[metric for metric in METRICS if metric not in measurements or measurements[metric]['status']!='ok']
+    failed=any(m['status']=='failed' for m in measurements.values()) or measurements.get('ram_errors',{}).get('value',0)>0
+    base={'version':OVERALL_VERSION,'score':None,'status':'failed' if failed else 'incomplete','completed':len(METRICS)-len(missing),'required':len(METRICS),'missing':missing,'components':{}}
+    if failed or missing:return base
+    if any(not math.isfinite(m['value']) or not math.isfinite(m['seconds']) or m['seconds']<=0 or m['unit']!=METRICS[m['metric']] or m['value']<0 or m['metric']!='ram_errors' and m['value']<=0 for m in measurements.values()):return base
+    v={metric:m['value'] for metric,m in measurements.items()}
+    # Geometric means prevent a large-unit metric from dominating by addition.
+    # CPU: equal single/multi; disk: equal read/write and inverse latency.
+    components={'cpu':math.exp((math.log(v['cpu_single'])+math.log(v['cpu_multi']))/2)*1000/1024,
+                'gpu':v['gpu_compute'], 'ram':v['ram_copy']*1000/1024,
+                'disk':math.exp((math.log(v['disk_read']*1000/1024)+math.log(v['disk_write']*1000/1024)+math.log(1000)-math.log(v['disk_latency']))/3)}
+    score=math.exp(sum(OVERALL_WEIGHTS[k]*math.log(value) for k,value in components.items()))
+    return dict(base,score=score,status='complete',components=components)
 
 def connect():
     conn = sqlite3.connect(DB, timeout=5)
@@ -45,7 +64,16 @@ def initialize():
             result_id TEXT NOT NULL REFERENCES results(id) ON DELETE CASCADE,
             metric TEXT NOT NULL, value REAL NOT NULL, PRIMARY KEY(result_id,metric));
             CREATE INDEX IF NOT EXISTS metrics_rank ON metrics(metric,value DESC);
+            CREATE TABLE IF NOT EXISTS overall_scores (
+            result_id TEXT PRIMARY KEY REFERENCES results(id) ON DELETE CASCADE,
+            version TEXT NOT NULL, score REAL);
+            CREATE INDEX IF NOT EXISTS overall_rank ON overall_scores(version,score DESC);
         ''')
+        # Non-destructive backfill: existing reports and raw metrics are unchanged.
+        pending=c.execute('SELECT r.id,r.payload FROM results r LEFT JOIN overall_scores o ON r.id=o.result_id WHERE o.result_id IS NULL OR o.version!=?',(OVERALL_VERSION,))
+        for row in pending:
+            rating=overall_rating(json.loads(row['payload']))
+            c.execute('INSERT OR REPLACE INTO overall_scores VALUES (?,?,?)',(row['id'],OVERALL_VERSION,rating['score']))
 
 def keys(obj, expected):
     if not isinstance(obj, dict) or set(obj) != set(expected):
@@ -100,7 +128,7 @@ def rate(key, limit, period=3600):
         return count<limit
 
 def result(row):
-    body=json.loads(row['payload']);body.update(id=row['id'],created_utc=row['created'],verification='client-reported')
+    body=json.loads(row['payload']);body.update(id=row['id'],created_utc=row['created'],verification='client-reported',overall=overall_rating(body))
     return body
 
 class Server(ThreadingHTTPServer):
@@ -161,8 +189,8 @@ class Handler(BaseHTTPRequestHandler):
                 gpus=c.execute('SELECT COUNT(DISTINCT gpu) FROM results').fetchone()[0]
             return self.send(200,{'results':total,'cpus':cpus,'gpus':gpus,'suite':'dedsec-v1'})
         if path=='/api/results':
-            metric=q.get('metric',['cpu_multi'])[0]
-            if metric not in METRICS:raise ValueError()
+            metric=q.get('metric',['overall'])[0]
+            if metric not in METRICS and metric!='overall':raise ValueError()
             offset=max(0,min(100000,int(q.get('offset',['0'])[0])))
             search=q.get('q',[''])[0][:100];search=search.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
             where="r.suite='dedsec-v1' AND (r.cpu LIKE ? ESCAPE '\\' OR r.gpu LIKE ? ESCAPE '\\' OR r.windows LIKE ? ESCAPE '\\')"
@@ -170,7 +198,10 @@ class Handler(BaseHTTPRequestHandler):
             direction='ASC' if metric in ('disk_latency','ram_errors') else 'DESC'
             with connect() as c:
                 total=c.execute(f'SELECT COUNT(*) FROM results r WHERE {where}',params).fetchone()[0]
-                rows=c.execute(f'SELECT r.* FROM results r LEFT JOIN metrics m ON m.result_id=r.id AND m.metric=? WHERE {where} ORDER BY (m.value IS NULL),m.value {direction},r.created DESC LIMIT 30 OFFSET ?', [metric,*params,offset]).fetchall()
+                if metric=='overall':
+                    rows=c.execute(f'SELECT r.* FROM results r LEFT JOIN overall_scores o ON o.result_id=r.id AND o.version=? WHERE {where} ORDER BY (o.score IS NULL),o.score DESC,r.created DESC,r.id LIMIT 30 OFFSET ?', [OVERALL_VERSION,*params,offset]).fetchall()
+                else:
+                    rows=c.execute(f'SELECT r.* FROM results r LEFT JOIN metrics m ON m.result_id=r.id AND m.metric=? WHERE {where} ORDER BY (m.value IS NULL),m.value {direction},r.created DESC,r.id LIMIT 30 OFFSET ?', [metric,*params,offset]).fetchall()
             return self.send(200,{'items':[result(r) for r in rows],'total':total,'offset':offset,'limit':30})
         if re.fullmatch('/api/results/[a-f0-9]{24}',path):
             with connect() as c:row=c.execute('SELECT * FROM results WHERE id=?',(path.rsplit('/',1)[1],)).fetchone()
@@ -213,6 +244,8 @@ class Handler(BaseHTTPRequestHandler):
                 if c.execute('SELECT COUNT(*) FROM results').fetchone()[0]>=100000:return self.error(507,'Registry capacity reached')
                 c.execute('INSERT INTO results VALUES (?,?,?,?,?,?,?,?)',(identifier,created,payload['suite_version'],payload['system']['cpu'],payload['system']['gpu'],payload['system']['windows'],json.dumps(payload,ensure_ascii=False,allow_nan=False),token_hash))
                 c.executemany('INSERT INTO metrics VALUES (?,?,?)',[(identifier,m['metric'],m['value']) for m in payload['measurements'] if m['status']=='ok'])
+                rating=overall_rating(payload)
+                c.execute('INSERT INTO overall_scores VALUES (?,?,?)',(identifier,OVERALL_VERSION,rating['score']))
             return self.send(201,{'id':identifier,'url':SITE+'/result/'+identifier,'delete_token':token})
         except (ValueError,TypeError,KeyError):self.error(400,'Invalid publication schema or values')
         except sqlite3.Error:self.error(503,'Storage unavailable; local report is safe')

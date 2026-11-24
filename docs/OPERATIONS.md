@@ -10,6 +10,8 @@ The scripts in `deploy/` are **owner-specific administrative installation script
 
 Health: `https://tests.dedseckms.ru/api/health`. Public statistics: `/api/stats`. Service logs should contain lifecycle/errors only, not request data. Logs from unrelated network infrastructure are outside the application's retention guarantees.
 
+`deploy/update-rating.sh <staged-directory>` updates only the registry and its four changed static files, after a consistent database/code backup. The `overall_scores` table is additive and backfills existing reports without changing their original payloads. Only `dedsec-tests` restarts. A failure restores previous code; the additive table can safely remain, avoiding a database rollback that would discard new publications. Web code is root-owned, directories 0755 and files 0644; updates require scoped administrative access.
+
 ## Backups, deletion and recovery
 
 `dedsec-tests-backup.timer` runs daily at 04:50 Europe/Moscow plus a random delay up to ten minutes. The SQLite backup API captures a consistent snapshot; the last seven copies are retained under the private state directory. These are same-server backups; arrange an off-server copy separately if required.
