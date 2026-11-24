@@ -15,7 +15,7 @@ public partial class App : System.Windows.Application
         instance=new System.Threading.Mutex(true,e.Args.Contains("--capture")?@"Local\DedsecTestsCapture":@"Local\DedsecTests",out bool created);if(!created){MessageBox.Show("Dedsec Tests уже запущен. Проверьте окно или значок в трее.");Shutdown(0);return;}
         DispatcherUnhandledException += (_, args) => { if(e.Args.Contains("--capture")){File.WriteAllText(Path.Combine(AppContext.BaseDirectory,"capture-error.txt"),args.Exception.ToString());args.Handled=true;Shutdown(1);return;}MessageBox.Show(args.Exception.Message, "Dedsec Tests · ошибка"); args.Handled = true; };
         base.OnStartup(e);
-        var window=new MainWindow();if(e.Args.Contains("--capture")){window.WindowStartupLocation=WindowStartupLocation.Manual;window.Left=-16000;window.Top=-16000;window.ShowInTaskbar=false;}window.Show();
+        var window=new MainWindow();MainWindow=window;ShutdownMode=ShutdownMode.OnMainWindowClose;if(e.Args.Contains("--capture")){window.WindowStartupLocation=WindowStartupLocation.Manual;window.Left=-16000;window.Top=-16000;window.ShowInTaskbar=false;}window.Show();
     }
     private async Task Smoke()
     {

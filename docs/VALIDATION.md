@@ -1,6 +1,13 @@
 # Validation — 24 November 2026
 
-This is **0.3.0 Preview** for owner review before 1.0.0. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+This is **0.3.1 Preview** for owner review before 1.0.0. A successful local test is not evidence that every physical Windows 10/11 machine, sensor or driver works.
+
+## 0.3.1 update workflow and partition editor
+
+- The production HTTP transport was exercised against the actual GitHub API, redirected signed metadata and a complete published portable ZIP. Signature, size and SHA-256 matched. The reported user TLS failure was not reproduced on this computer; the new UI preserves the inner error, adds a local log and manual browser download without disabling certificate validation.
+- Isolated transport checks cover a failed connection, interrupted body followed by a clean retry, oversize refusal, cancellation during a blocked read, file-handle release, TLS explanations and compatible-version discovery. Transfer percentages use bytes actually read. Installer progress comes from the real extraction/copy/readiness transaction and reaches 100 only after readiness is confirmed. Ready, rollback and signed-traversal fixtures passed with the production helper.
+- Visual boundary checks cover Windows minimum rounding, maximum capacity, MiB alignment and invalid precision input. The modal opens before the potentially lengthy native bounds request. Closing cancels waiting only; the Windows service can finish its analysis in the background. Native writes still revalidate bounds and identity.
+- A separate offscreen application probe closes the actual owned editor with its X button and verifies that the main window remains visible, including restoration from minimized tray mode. Its settings are isolated under capture-local. It does not change partitions.
 
 ## 0.3.0 disk manager and consolidated workspace
 

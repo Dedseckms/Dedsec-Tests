@@ -2,6 +2,7 @@ using Dedsec.Tests;
 using Dedsec.Update;
 using System.Text.Json;
 using System.Reflection;
+if(args.Contains("--dialog-close")){DialogChecks.Run();return;}
 if(args.Contains("--agreement-ready"))
 {
     if(!args.Contains("--capture"))throw new InvalidOperationException("Agreement probe requires isolated capture settings.");
@@ -26,6 +27,8 @@ if(args.Length==2&&args[0]=="--job-owner")
 }
 int passed=0;
 void Check(bool ok,string name){if(!ok)throw new Exception(name);Console.WriteLine("PASS "+name);passed++;}
+await UpdateChecks.Run(Check);
+if(args.Contains("--update-live"))await UpdateChecks.Live(Check);
 using(var cancel=new CancellationTokenSource()){cancel.Cancel();try{await Benchmarks.Cpu(true,cancel.Token,.1);throw new Exception("Cancellation ignored");}catch(OperationCanceledException){Check(true,"CPU cancellation observed");}}
 var cpu=await Benchmarks.Cpu(false,CancellationToken.None,.15);Check(cpu.Value>0&&cpu.Seconds>=.15,"CPU returns timed finite throughput");
 var dataset=(byte[])typeof(Benchmarks).GetField("Data",BindingFlags.NonPublic|BindingFlags.Static)!.GetValue(null)!;byte original=dataset[0];dataset[0]^=1;try{await Benchmarks.Cpu(false,CancellationToken.None,.1);throw new Exception("Corrupt SHA payload accepted");}catch(InvalidDataException){Check(true,"CPU digest mismatch fails instead of producing a score");}finally{dataset[0]=original;}
@@ -112,6 +115,9 @@ if(args.Contains("--ui"))
             var diskChoice=new System.Windows.Controls.ComboBox{ItemsSource=new[]{new StorageDisk{Number=7,Name="QA-Disk",Size=512UL*1024*1024*1024,Style="GPT"}},DisplayMemberPath="Description",SelectedIndex=0};window.Content=diskChoice;window.UpdateLayout();
             string selectedDiskText=LiveTable.Find<System.Windows.Controls.TextBlock>(diskChoice)?.Text??"";
             Check(selectedDiskText.Contains("QA-Disk")&&!selectedDiskText.Contains("Dedsec.Tests.StorageDisk"),"Dark disk selector renders the model and size instead of the CLR type name");
+            var resize=new ResizeEditor(100UL*StorageBackend.MiB+1,300UL*StorageBackend.MiB,200UL*StorageBackend.MiB);window.Content=resize;window.UpdateLayout();resize.Boundary.SetFraction(-1);Check(resize.SelectedBytes==101UL*StorageBackend.MiB,"Visual partition boundary clamps and aligns Windows minimum upward");resize.Boundary.SetFraction(1);Check(resize.SelectedBytes==300UL*StorageBackend.MiB,"Visual partition boundary reaches the maximum contiguous capacity");resize.Boundary.SetFraction(.5);Check(resize.SelectedBytes>=101UL*StorageBackend.MiB&&resize.SelectedBytes<=300UL*StorageBackend.MiB&&resize.SelectedBytes%StorageBackend.MiB==0,"Dragging preview keeps an aligned size inside actual Windows bounds");
+            var input=LiveTable.Find<System.Windows.Controls.TextBox>(resize)!;input.Text="invalid";Check(!resize.InputValid,"Invalid precision input cannot retain an actionable old partition size");resize.Boundary.SetFraction(0);Check(resize.InputValid,"A new boundary selection recovers valid precision input");
+            var map=PartitionMap.Create(new StorageDisk{Size=512UL*1024*1024*1024,Style="GPT",Partitions=new(){new StoragePartition{Number=1,Offset=StorageBackend.MiB,Size=100*StorageBackend.MiB,GptType="c12a7328-f81f-11d2-ba4b-00a0c93ec93b",Filesystem="FAT32",Protected=true},new StoragePartition{Number=2,Offset=101*StorageBackend.MiB,Size=16*StorageBackend.MiB,Protected=true},new StoragePartition{Number=3,Offset=117*StorageBackend.MiB,Size=500UL*1024*1024*1024,Letter="C",Boot=true,Filesystem="NTFS"}}});window.Content=map;window.UpdateLayout();Check(map.Children.OfType<System.Windows.Controls.Border>().All(card=>card.ActualWidth>=150),"EFI and reserved partition cards retain readable widths instead of ellipsis-only labels");
             var chartView=new DashboardView("cpu","gpu","ram","disk");window.Content=chartView;window.Width=696;window.Height=370;window.UpdateLayout();chartView.Update(history,900,started.AddSeconds(1198));window.UpdateLayout();
             Check(chartView.Children.Count==4&&LiveTable.Find<LivePlot>(chartView)!.ActualHeight>=50,"All dashboard cards render together with usable chart height in the minimum viewport");
             string capture=Path.Combine(Environment.CurrentDirectory,"artifacts","ui-dark-grid.png");Directory.CreateDirectory(Path.GetDirectoryName(capture)!);var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)window.ActualWidth,(int)window.ActualHeight,96,96,System.Windows.Media.PixelFormats.Pbgra32);bitmap.Render(window);var png=new System.Windows.Media.Imaging.PngBitmapEncoder();png.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var image=File.Create(capture))png.Save(image);window.Close();app.Shutdown();
@@ -142,6 +148,7 @@ int fixtureIndex=Array.IndexOf(args,"--updater-fixture");if(fixtureIndex>=0)
     using var rsa=System.Security.Cryptography.RSA.Create();rsa.ImportFromPem(File.ReadAllText(key));
     foreach(string mode in new[]{"ready","fail","traversal"})
     {
+        var updateProgress=new List<(string Message,double Percent)>();assembly.GetType("Dedsec.Tests.Updater.Program")!.GetField("Progress",BindingFlags.Static|BindingFlags.NonPublic)!.SetValue(null,new Action<string,double>((message,percent)=>updateProgress.Add((message,percent))));
         string root=Path.Combine(sandbox,mode),target=Path.Combine(root,"installed"),stage=Path.Combine(root,"stage"),payloadDir=Path.Combine(root,"payload");Directory.CreateDirectory(target);Directory.CreateDirectory(stage);Directory.CreateDirectory(payloadDir);
         foreach(string file in Directory.GetFiles(fixture)){File.Copy(file,Path.Combine(target,Path.GetFileName(file)));File.Copy(file,Path.Combine(payloadDir,Path.GetFileName(file)));}File.WriteAllText(Path.Combine(target,"mode.txt"),"old");File.WriteAllText(Path.Combine(payloadDir,"mode.txt"),mode);
         string package=Path.Combine(stage,"package.zip");System.IO.Compression.ZipFile.CreateFromDirectory(payloadDir,package);
@@ -149,6 +156,7 @@ int fixtureIndex=Array.IndexOf(args,"--updater-fixture");if(fixtureIndex>=0)
         using(var stream=File.OpenRead(package)){var manifest=new UpdateManifest("0.1.1","https://github.com/Dedseckms/Dedsec-Tests/releases/download/v0.1.1/fixture.zip",Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(stream)),stream.Length,"x64");var data=JsonSerializer.SerializeToUtf8Bytes(manifest);File.WriteAllBytes(Path.Combine(stage,"manifest.json"),data);File.WriteAllBytes(Path.Combine(stage,"manifest.sig"),rsa.SignData(data,System.Security.Cryptography.HashAlgorithmName.SHA256,System.Security.Cryptography.RSASignaturePadding.Pss));}
         bool failed=false;try{apply.Invoke(null,new object[]{new[]{stage,target,int.MaxValue.ToString()}});}catch(TargetInvocationException){failed=true;}
         if(mode=="ready")Check(!failed&&File.ReadAllText(Path.Combine(target,"mode.txt"))=="ready"&&File.ReadAllText(Path.Combine(stage,"rollback","mode.txt"))=="old","Updater transaction and ready handshake");
+        if(mode=="ready")Check(updateProgress.Last().Percent==100&&updateProgress.Any(p=>p.Message.Contains("устанавливаем"))&&updateProgress.Any(p=>p.Message.Contains("готовности")),"Actual installer transaction reports copy progress and reaches 100 only after the readiness handshake");
         if(mode=="fail")Check(failed&&File.ReadAllText(Path.Combine(target,"mode.txt"))=="old","Failed launch restores previous payload");
         if(mode=="traversal")Check(failed&&!File.Exists(Path.Combine(stage,"outside.txt"))&&File.ReadAllText(Path.Combine(target,"mode.txt"))=="old","Even a signed ZIP cannot escape extraction root");
     }
